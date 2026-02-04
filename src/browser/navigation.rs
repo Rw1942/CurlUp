@@ -131,20 +131,27 @@ pub async fn navigate_and_wait_with_stealth(client: &Client, url: &str, stealth:
 }
 
 /// Scroll down to trigger lazy content, then return to top.
+/// 
+/// Many sites use lazy loading for images and content. This function:
+/// 1. Scrolls down in steps to trigger lazy-loaded content
+/// 2. Waits between scrolls for content to load
+/// 3. Returns to the top of the page
 pub async fn scroll_to_top_after_load(client: &Client) -> Result<()> {
     let height_script = r#"return window.innerHeight || 800;"#;
     let height_value = client.execute(height_script, vec![]).await?;
     let viewport = height_value.as_i64().unwrap_or(800).max(200);
 
-    for step in 1..=3 {
+    // Scroll down in 4 steps, waiting 500ms between each for lazy content to load
+    for step in 1..=4 {
         let offset = viewport * step as i64;
         let scroll_script = format!("window.scrollTo(0, {});", offset);
         let _ = client.execute(&scroll_script, vec![]).await?;
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
+    // Return to top and wait for any final content to settle
     let _ = client.execute("window.scrollTo(0, 0);", vec![]).await?;
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
 
     Ok(())
 }

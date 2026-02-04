@@ -80,33 +80,25 @@ curlup -v mail.google.com       # Visible browser (for login)
 
 ### While Browsing
 
-CurlUp features a **floating command bar** that stays visible while you read. The bar shows where `b` (back) and `f` (forward) will take you. Type a command and press **Enter** to execute it.
+The command bar shows where `b` (back) and `f` (forward) will take you. Type a command and press **Enter** to execute it.
 
 | Command | What it does |
 |---------|--------------|
 | `1-999` | Follow that link number |
 | `b` | Go back (shows destination) |
 | `f` | Go forward (shows destination) |
+| `t` | Scroll to top of page |
+| `h` or `0` | Return to site picker |
 | `C` | Toggle condensed/reader mode |
 | `r` | Refresh the page |
 | `u` | Show current URL |
-| `h` | Show help |
 | `q` | Quit CurlUp |
+| `help` | Show help |
 | `google.com` | Navigate to any URL |
-| `home` | Return to site picker |
 
-**Scrolling** (for long pages):
+**Scrolling:** Use `t` to jump to top, or use terminal scrollback (mouse wheel, trackpad, Shift+PageUp/Down).
 
-| Command | What it does |
-|---------|--------------|
-| `j` / `k` | Scroll down/up one line |
-| `e` / `d` | Page up/down |
-| `g` / `G` | Jump to top/bottom |
-| Enter (empty) | Scroll down a few lines |
-
-The scroll position indicator on the right shows `↑↓ 50%` style progress.
-
-**Example:** To follow link 5, type `5` then press Enter. Type `b` to go back to the previous page (the footer shows where you'll go).
+**Example:** To follow link 5, type `5` then press Enter. Type `b` to go back (the footer shows where you'll go).
 
 ### All Options
 
