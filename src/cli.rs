@@ -1,0 +1,43 @@
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(name = "curlup")]
+#[command(version)]
+#[command(about = "A terminal-first, text-only browser powered by real web rendering")]
+#[command(long_about = r#"CurlUp is a terminal web browser that renders pages using Chrome and lets you
+navigate by clicking on numbered links - all from your command line.
+
+INTERACTIVE MODE (default):
+    curlup                              Start with site picker, then browse
+    curlup news.ycombinator.com         Go directly to a site and browse
+
+SINGLE-PAGE MODE:
+    curlup -s news.google.com           Fetch page once and exit (good for piping)
+    curlup -s -r news.google.com        Raw output for scripting
+
+EXAMPLES:
+    curlup                              Pick a site interactively, then browse
+    curlup github.com/trending          Browse GitHub trending repos
+    curlup -s example.com | less        Pipe single page to less
+    curlup -v mail.google.com           Visible browser for login
+
+REQUIREMENTS:
+    • Google Chrome installed
+    • ChromeDriver matching your Chrome version"#)]
+pub struct Cli {
+    /// URL to navigate to (if omitted, shows interactive site picker)
+    #[arg(value_name = "URL")]
+    pub url: Option<String>,
+
+    /// Single-page mode - fetch once and exit (disables interactive browsing)
+    #[arg(long, short = 's')]
+    pub single: bool,
+
+    /// Launch Chrome in visible mode (useful for login or debugging)
+    #[arg(long, short = 'v')]
+    pub visible: bool,
+
+    /// Raw output mode (no formatting, all lines separate - implies --single)
+    #[arg(long, short = 'r')]
+    pub raw: bool,
+}

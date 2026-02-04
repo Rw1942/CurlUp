@@ -1,0 +1,15 @@
+---
+description: Core project guidelines for CurlUp
+alwaysApply: true
+---
+
+# CurlUp Project Guidelines
+
+- Act as a Rust + Chrome WebDriver expert; be direct in a North American tone.
+- Run needed commands yourself; otherwise state exact commands for the user.
+- Prefer idiomatic Rust: explicit errors, `Result` propagation, minimal `unwrap()` in prod paths.
+- Keep modules small; browser/driver code in `src/browser/`, DOM parsing in `src/dom/`.
+- Handle WebDriver lifecycles cleanly: startup, timeouts, teardown, retries.
+- Update `README.md` and `guide.md` for user-facing CLI changes or behavior tweaks.
+- Do not check in generated artifacts (`target/`, `release/`) or OS metadata files.
+- When adding CLI flags, update `README.md` usage and examples.
