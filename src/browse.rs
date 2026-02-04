@@ -45,16 +45,17 @@ pub async fn run_interactive(
         // Extract content with links
         let content = extract_page_content(client, &current_url).await?;
         
-        // Clear screen and render
-        clear_screen();
-        print_header(&current_url, history.len());
-        
+        // Raw mode: just output text and exit (no screen clearing or headers)
         if raw_mode {
             crate::render::text::render(&content.lines);
             println!();
             print_raw_mode_footer(content.links.len());
             return Ok(());
         }
+        
+        // Interactive mode: clear screen and show header
+        clear_screen();
+        print_header(&current_url, history.len());
         
         let height = terminal_height();
         let content_height = content_area_height(height);

@@ -2,11 +2,10 @@
 //!
 //! Extraction pipeline:
 //! 1. Chrome renders the page (JavaScript executes)
-//! 2. Remove hidden elements from DOM
-//! 3. Get the rendered HTML
-//! 4. Run Readability to extract main content
-//! 5. Fall back to semantic tags if Readability returns sparse content
-//! 6. Clean up extracted text
+//! 2. Get the rendered HTML
+//! 3. Try Readability algorithm to extract main content
+//! 4. Fall back to body text if Readability returns sparse content
+//! 5. Clean up extracted text
 //!
 //! This works for both static and dynamic pages.
 
@@ -20,7 +19,7 @@ use url::Url;
 use super::content::{Link, PageContent};
 
 /// Minimum lines for Readability result to be considered "good enough".
-/// Below this threshold, we try semantic tag fallback.
+/// Below this threshold, we fall back to body text extraction.
 const MIN_CONTENT_LINES: usize = 3;
 
 #[derive(Debug, Deserialize)]
@@ -46,71 +45,34 @@ pub async fn extract_text(client: &Client) -> Result<Vec<String>> {
 
 /// Extract page content including text and links.
 pub async fn extract_page_content(client: &Client, current_url: &str) -> Result<PageContent> {
-    // Step 1: Remove hidden elements before extraction
-    remove_hidden_elements(client).await?;
-
-    // Step 2: Get rendered HTML
+    // Step 1: Get rendered HTML
     let html = get_rendered_html(client).await?;
 
-    // Step 3: Extract with Readability
+    // Step 2: Try Readability extraction
     let mut lines = extract_with_readability(&html, current_url);
 
-    // Step 4: If Readability returned sparse content, try semantic fallback
+    // Step 3: If Readability returned sparse content, fall back to body text
+    // This handles sites like Hacker News that use table-based layouts
     if lines.len() < MIN_CONTENT_LINES {
-        if let Ok(fallback) = extract_semantic_content(client).await {
-            if fallback.len() >= lines.len() {
+        if let Ok(fallback) = extract_body_text(client).await {
+            if fallback.len() > lines.len() {
                 lines = fallback;
             }
         }
     }
 
-    // Step 5: Clean up the extracted text
+    // Step 4: Clean up the extracted text
     let lines = clean_text(lines);
 
-    // Step 6: Extract links
+    // Step 5: Extract links
     let links = extract_links(client).await?;
 
     Ok(PageContent::new(current_url.to_string(), lines, links))
 }
 
 // ============================================================================
-// DOM Preparation
+// HTML Extraction
 // ============================================================================
-
-/// Remove hidden elements from the DOM before extraction.
-/// This catches content that's rendered but not visible to users.
-async fn remove_hidden_elements(client: &Client) -> Result<()> {
-    let script = r#"
-        (function() {
-            // Remove elements with inline hidden styles
-            var selectors = [
-                '[style*="display: none"]',
-                '[style*="display:none"]',
-                '[style*="visibility: hidden"]',
-                '[style*="visibility:hidden"]',
-                '[hidden]',
-                '[aria-hidden="true"]'
-            ];
-            
-            selectors.forEach(function(sel) {
-                document.querySelectorAll(sel).forEach(function(el) {
-                    el.remove();
-                });
-            });
-            
-            // Remove elements hidden via computed style
-            document.querySelectorAll('*').forEach(function(el) {
-                var style = window.getComputedStyle(el);
-                if (style.display === 'none' || style.visibility === 'hidden') {
-                    el.remove();
-                }
-            });
-        })();
-    "#;
-
-    let _ = client.execute(script, vec![]).await;
-    Ok(())
-}
 
 /// Get rendered HTML from the DOM.
 async fn get_rendered_html(client: &Client) -> Result<String> {
@@ -128,6 +90,7 @@ async fn get_rendered_html(client: &Client) -> Result<String> {
 // ============================================================================
 
 /// Extract main content using Mozilla's Readability algorithm.
+/// Works well for article-style pages with semantic HTML.
 fn extract_with_readability(html: &str, url_str: &str) -> Vec<String> {
     let url = match Url::parse(url_str) {
         Ok(u) => u,
@@ -146,37 +109,10 @@ fn extract_with_readability(html: &str, url_str: &str) -> Vec<String> {
     }
 }
 
-/// Fallback: extract text from HTML5 semantic containers.
-/// Tries <article>, <main>, then largest <section>.
-async fn extract_semantic_content(client: &Client) -> Result<Vec<String>> {
-    let script = r#"
-        (function() {
-            // Priority order: article > main > largest section
-            var container = document.querySelector('article') 
-                         || document.querySelector('main')
-                         || document.querySelector('[role="main"]');
-            
-            // If no semantic container, find the section with most text
-            if (!container) {
-                var sections = document.querySelectorAll('section');
-                var maxLen = 0;
-                sections.forEach(function(s) {
-                    var len = (s.innerText || '').length;
-                    if (len > maxLen) {
-                        maxLen = len;
-                        container = s;
-                    }
-                });
-            }
-            
-            // Last resort: body
-            if (!container) {
-                container = document.body;
-            }
-            
-            return container ? (container.innerText || '') : '';
-        })();
-    "#;
+/// Fallback: extract all visible text from the page body.
+/// Used when Readability fails (e.g., table-based layouts like Hacker News).
+async fn extract_body_text(client: &Client) -> Result<Vec<String>> {
+    let script = "return document.body ? document.body.innerText : '';";
 
     let result = client.execute(script, vec![]).await?;
     let text = result.as_str().unwrap_or("");
@@ -196,7 +132,6 @@ async fn extract_semantic_content(client: &Client) -> Result<Vec<String>> {
 fn clean_text(lines: Vec<String>) -> Vec<String> {
     lines
         .into_iter()
-        // Remove lines that are just punctuation or very short
         .filter(|line| {
             let trimmed = line.trim();
             trimmed.len() >= 2 && !is_junk_line(trimmed)
@@ -204,16 +139,15 @@ fn clean_text(lines: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-/// Check if a line is likely junk (navigation remnants, etc).
+/// Check if a line is likely junk (boilerplate, not real content).
 fn is_junk_line(line: &str) -> bool {
-    let lower = line.to_lowercase();
-
     // Lines that are just symbols or punctuation
     if line.chars().all(|c| !c.is_alphanumeric()) {
         return true;
     }
 
     // Common footer/boilerplate patterns
+    let lower = line.to_lowercase();
     let junk_patterns = [
         "all rights reserved",
         "copyright ©",
@@ -231,7 +165,7 @@ fn is_junk_line(line: &str) -> bool {
 // ============================================================================
 
 /// Extract links via JavaScript.
-/// Filters out navigation-style links and duplicates.
+/// Skips links inside nav/header/footer elements.
 async fn extract_links(client: &Client) -> Result<Vec<Link>> {
     let script = r#"
         return (function() {
