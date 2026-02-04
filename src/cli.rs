@@ -18,7 +18,8 @@ SINGLE-PAGE MODE:
 EXAMPLES:
     curlup                              Pick a site interactively, then browse
     curlup github.com/trending          Browse GitHub trending repos
-    curlup -s example.com | less        Pipe single page to less
+    curlup -p example.com               View page in pager (less) for easy scrolling
+    curlup -s example.com | less        Pipe single page to less (manual)
     curlup -v mail.google.com           Visible browser for login
     curlup --user-agent "MyBot/1.0"     Use custom user-agent
     curlup --no-stealth -v              Debug mode without stealth
@@ -55,4 +56,8 @@ pub struct Cli {
     /// Use multi-lens content extraction (CSS, ARIA, text-density heuristics)
     #[arg(long, short = 'm')]
     pub multilens: bool,
+
+    /// Pipe output to system pager (less) for easy scrolling - implies --single
+    #[arg(long, short = 'p')]
+    pub pager: bool,
 }

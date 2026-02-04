@@ -1,5 +1,7 @@
 use anyhow::{bail, Result};
 use clap::Parser;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 mod browse;
 mod browser;
@@ -15,8 +17,8 @@ async fn main() -> Result<()> {
     let args = cli::Cli::parse();
 
     // Determine if we should use single-page mode
-    // Raw mode implies single-page mode (for piping to other tools)
-    let single_mode = args.single || args.raw;
+    // Raw mode and pager mode imply single-page mode (for piping to other tools)
+    let single_mode = args.single || args.raw || args.pager;
 
     // Spawn ChromeDriver in the background
     let mut driver = browser::driver::spawn().await?;
@@ -53,17 +55,26 @@ async fn main() -> Result<()> {
         };
         let link_count = content.links.len();
 
-        // Render to terminal (condensed by default, raw if requested)
-        if args.raw {
-            render::text::render(&content.lines);
-        } else {
-            render::text::render_condensed(&content.lines);
-        }
+        // Build output lines using html2text for clean terminal rendering
+        let output_lines = render::text::render_html(&content.html);
 
-        // Print link count footer
-        println!();
-        println!("────────────────────────────────────────────────────────────");
-        println!("  {} links found. Run without -s/-r for interactive browsing.", link_count);
+        // Add footer
+        let footer = format!(
+            "\n────────────────────────────────────────────────────────────\n  {} links found. Run without -s/-r/-p for interactive browsing.",
+            link_count
+        );
+
+        if args.pager {
+            // Pager mode - pipe to system pager
+            let output = output_lines.join("\n") + &footer + "\n";
+            output_to_pager(&output)?;
+        } else {
+            // Direct output to stdout
+            for line in output_lines {
+                println!("{}", line);
+            }
+            println!("{}", footer);
+        }
     } else {
         // Interactive browsing mode (default)
         // This loop allows returning to the start screen with 'home' command
@@ -93,6 +104,41 @@ async fn main() -> Result<()> {
 
     // Clean up ChromeDriver process
     driver.kill().await?;
+
+    Ok(())
+}
+
+/// Output content to the system pager (less or $PAGER)
+fn output_to_pager(content: &str) -> Result<()> {
+    // Get pager from environment or default to less
+    let pager = std::env::var("PAGER").unwrap_or_else(|_| "less".to_string());
+
+    // Try to spawn the pager
+    let mut child = match Command::new(&pager)
+        .stdin(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => {
+            // Fallback: try less explicitly
+            match Command::new("less").stdin(Stdio::piped()).spawn() {
+                Ok(child) => child,
+                Err(_) => {
+                    // No pager available, just print to stdout
+                    print!("{}", content);
+                    return Ok(());
+                }
+            }
+        }
+    };
+
+    // Write content to pager's stdin
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(content.as_bytes());
+    }
+
+    // Wait for pager to exit
+    let _ = child.wait();
 
     Ok(())
 }

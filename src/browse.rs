@@ -23,24 +23,6 @@ struct HistoryEntry {
     title: String,
 }
 
-/// Run the interactive browsing session (with stealth enabled by default).
-#[allow(dead_code)]
-pub async fn run_interactive(
-    client: &fantoccini::Client,
-    initial_url: &str,
-) -> Result<()> {
-    run_interactive_with_options(client, initial_url, true, false).await
-}
-
-/// Run the interactive browsing session with stealth mode option
-pub async fn run_interactive_with_stealth(
-    client: &fantoccini::Client,
-    initial_url: &str,
-    stealth: bool,
-) -> Result<()> {
-    run_interactive_with_options(client, initial_url, stealth, false).await
-}
-
 /// Run the interactive browsing session with all options
 pub async fn run_interactive_with_options(
     client: &fantoccini::Client,
@@ -356,11 +338,15 @@ fn wait_for_enter() {
     let _ = io::stdin().read_line(&mut buf);
 }
 
-/// Get page title from content
+/// Get page title from content (extracts domain from URL)
 fn get_page_title(content: &PageContent) -> String {
+    // Extract domain from URL as the page title
     content
-        .lines
-        .first()
+        .url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
         .map(|s| truncate_text(s, 30))
         .unwrap_or_else(|| "Unknown".to_string())
 }

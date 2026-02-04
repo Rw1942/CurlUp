@@ -1,14 +1,15 @@
 //! Inline link annotation for terminal display.
 
 use crate::dom::content::{Link, PageContent};
-use super::format_for_terminal_with_url;
+use super::format_for_terminal;
 
 const SUPERSCRIPTS: [char; 10] = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
 
 /// Build formatted lines with link annotations for display.
 /// Returns vector of strings ready for printing.
 pub fn build_render_with_links_lines(content: &PageContent, width: usize) -> Vec<String> {
-    let formatted = format_for_terminal_with_url(Some(content.url.as_str()), &content.lines, width);
+    // Render HTML to terminal text using html2text
+    let formatted = format_for_terminal(&content.html, width);
     annotate_links(&formatted, &content.links)
 }
 
@@ -38,10 +39,12 @@ fn annotate_links(lines: &[String], links: &[Link]) -> Vec<String> {
         for line in &mut result {
             if let Some(pos) = line.to_lowercase().find(&needle) {
                 let end = pos + link.text.len();
-                let before = &line[..end];
-                let after = &line[end..];
-                *line = format!("{}{}{}", before, marker, after);
-                break;
+                if end <= line.len() {
+                    let before = &line[..end];
+                    let after = &line[end..];
+                    *line = format!("{}{}{}", before, marker, after);
+                    break;
+                }
             }
         }
     }

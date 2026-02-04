@@ -19,6 +19,8 @@ dialoguer = { version = "0.11", features = ["fuzzy-select"] }
 console = "0.15"
 url = "2.5"
 
-# Multi-lens content extraction
+# HTML parsing for link extraction
 scraper = "0.25"
-dom-content-extraction = "0.3"
+
+# HTML to terminal text rendering
+html2text = "0.16"

@@ -11,20 +11,20 @@ pub struct Link {
     pub href: String,
 }
 
-/// Page content with both text and extracted links.
+/// Page content with HTML and extracted links.
 #[derive(Debug, Clone)]
 pub struct PageContent {
     /// The URL the content was extracted from
     pub url: String,
-    /// Text lines extracted from the page
-    pub lines: Vec<String>,
+    /// Raw HTML from the rendered page (for html2text rendering)
+    pub html: String,
     /// Links extracted from the page (indexed by their display number)
     pub links: Vec<Link>,
 }
 
 impl PageContent {
-    pub fn new(url: String, lines: Vec<String>, links: Vec<Link>) -> Self {
-        Self { url, lines, links }
+    pub fn new(url: String, html: String, links: Vec<Link>) -> Self {
+        Self { url, html, links }
     }
 
     /// Get a link by its 1-based display number
