@@ -13,8 +13,9 @@ use std::io::{self, Write};
 use crate::browser;
 use crate::dom::content::PageContent;
 use crate::dom::extract::extract_page_content;
+use crate::dom::link_filter::MAX_LINKS;
 use crate::dom::multilens::extract_multilens;
-use crate::render::markdown::build_render_lines;
+use crate::render::build_render_lines;
 use crate::term::{clear_screen, terminal_width};
 
 /// History entry for back navigation
@@ -54,11 +55,11 @@ pub async fn run_interactive_with_options(
         
         // Build lines for display
         let lines = build_render_lines(&content);
-        
+
         // Clear screen and show header
         clear_screen();
         print_header(&current_url, history.len());
-        
+
         // Display all content - let user scroll with native terminal scrollback
         for line in &lines {
             println!("{}", line);
@@ -147,37 +148,41 @@ fn prompt_for_action(
     history_depth: usize,
     show_tip: bool,
 ) -> Result<BrowseAction> {
-    // Build prompt with context
-    let back_hint = if history_depth > 0 {
-        format!(" {}:{}", style("b").dim(), style("back").dim())
-    } else {
-        String::new()
-    };
-    
-    let link_hint = if !content.links.is_empty() {
-        format!(
-            " {}",
-            style(format!("1-{}:link", content.links.len().min(20))).dim()
-        )
-    } else {
-        String::new()
-    };
-    
-    // Build summary line
-    let summary = links_summary_line(content, show_tip);
+    let link_count = content.links.len().min(MAX_LINKS);
     
     println!();
     println!("{}", style("─".repeat(terminal_width())).dim());
-    println!("  {}", summary);
     
-    let prompt = format!(
-        "  > {}{}{} ",
-        style("q:quit h:help r:refresh").dim(),
-        back_hint,
-        link_hint,
-    );
-
-    print!("{}", prompt);
+    // Build a clean, informative prompt line
+    let mut prompt_parts: Vec<String> = Vec::new();
+    
+    // Link navigation hint (most important action)
+    if link_count > 0 {
+        prompt_parts.push(format!(
+            "{}",
+            style(format!("1-{}", link_count)).cyan().bold()
+        ));
+    }
+    
+    // Back navigation (only if history exists)
+    if history_depth > 0 {
+        prompt_parts.push(format!("{}", style("b").dim()));
+    }
+    
+    // Standard commands
+    prompt_parts.push(format!("{}", style("r").dim()));
+    prompt_parts.push(format!("{}", style("h").dim()));
+    prompt_parts.push(format!("{}", style("q").dim()));
+    
+    // First-time tip
+    let tip = if show_tip && link_count > 0 {
+        format!("  {}", style("type a number to follow a link").dim().italic())
+    } else {
+        String::new()
+    };
+    
+    let prompt = format!("  {} >{}", prompt_parts.join(" "), tip);
+    print!("{} ", prompt);
     io::stdout().flush()?;
     
     let mut input = String::new();
@@ -206,7 +211,7 @@ fn prompt_for_action(
             
             // Try to parse as a number
             if let Ok(num) = input.parse::<usize>() {
-                if num > 0 && num <= content.links.len().min(20) {
+                if num > 0 && num <= link_count {
                     Ok(BrowseAction::FollowLink(num))
                 } else if num == 0 {
                     Ok(BrowseAction::Invalid("Link numbers start at 1".to_string()))
@@ -214,7 +219,7 @@ fn prompt_for_action(
                     Ok(BrowseAction::Invalid(format!(
                         "Link #{} not found (only {} links on this page)",
                         num,
-                        content.links.len().min(20)
+                        link_count
                     )))
                 }
             } else {
@@ -262,41 +267,45 @@ fn print_header(url: &str, history_depth: usize) {
 fn print_help() {
     clear_screen();
     
-    let help = r#"
-  ╭─────────────────────────────────────────────────────╮
-  │                                                     │
-  │            CurlUp Navigation Guide                  │
-  │                                                     │
-  ├─────────────────────────────────────────────────────┤
-  │                                                     │
-  │   SCROLLING                                         │
-  │   ─────────                                         │
-  │   Use your terminal's native scrollback:            │
-  │   - Scroll wheel / trackpad                         │
-  │   - Shift+PageUp / Shift+PageDown                   │
-  │                                                     │
-  │   NAVIGATION                                        │
-  │   ───────────                                       │
-  │   [1-20]     Follow a numbered link                 │
-  │   b, back    Go back to previous page               │
-  │   r          Refresh current page                   │
-  │                                                     │
-  │   QUICK ACTIONS                                     │
-  │   ─────────────                                     │
-  │   [url]      Go directly to any URL                 │
-  │              (e.g., "google.com" or full URL)       │
-  │   u          Show current page URL                  │
-  │   home       Return to site picker                  │
-  │                                                     │
-  │   OTHER                                             │
-  │   ─────                                             │
-  │   h, ?       Show this help                         │
-  │   q          Quit CurlUp                            │
-  │                                                     │
-  ╰─────────────────────────────────────────────────────╯
-"#;
+    println!();
+    println!("  {}", style("CurlUp Navigation").cyan().bold());
+    println!("  {}", style("─".repeat(50)).dim());
+    println!();
     
-    println!("{}", style(help).cyan());
+    // Links section - most important
+    println!("  {}  Links appear as {} in the text", 
+        style("LINKS").white().bold(),
+        style("colored numbers").cyan().bold()
+    );
+    println!("       Type the number and press Enter to follow");
+    println!("       Example: {} opens the first link", style("1").cyan().bold());
+    println!();
+    
+    // Navigation
+    println!("  {}", style("NAVIGATE").white().bold());
+    println!("       {}      go back to previous page", style("b").cyan());
+    println!("       {}      refresh current page", style("r").cyan());
+    println!("       {}   return to site picker", style("home").cyan());
+    println!();
+    
+    // Direct URL
+    println!("  {}", style("GO TO URL").white().bold());
+    println!("       Type any URL directly (e.g., {})", style("google.com").cyan());
+    println!("       {}      show current page URL (for copying)", style("u").cyan());
+    println!();
+    
+    // Scrolling
+    println!("  {}", style("SCROLL").white().bold());
+    println!("       Use your terminal's native scrollback:");
+    println!("       Mouse wheel, trackpad, or Shift+PageUp/Down");
+    println!();
+    
+    // Exit
+    println!("  {}", style("EXIT").white().bold());
+    println!("       {}      quit CurlUp", style("q").cyan());
+    println!();
+    
+    println!("  {}", style("─".repeat(50)).dim());
 }
 
 /// Print current URL
@@ -350,26 +359,6 @@ fn get_page_title(content: &PageContent) -> String {
         .next()
         .map(|s| truncate_text(s, 30))
         .unwrap_or_else(|| "Unknown".to_string())
-}
-
-fn links_summary_line(content: &PageContent, show_tip: bool) -> String {
-    let link_count = content.links.len();
-    let link_summary = if link_count == 0 {
-        "No links".to_string()
-    } else {
-        let shown = link_count.min(20);
-        if link_count > shown {
-            format!("{} of {} links inline (1-{})", shown, link_count, shown)
-        } else {
-            format!("{} links inline (1-{})", link_count, link_count)
-        }
-    };
-
-    if show_tip {
-        format!("{} | Tip: type a number to follow", link_summary)
-    } else {
-        link_summary
-    }
 }
 
 /// Truncate URL for display

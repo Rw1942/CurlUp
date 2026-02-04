@@ -7,7 +7,7 @@
 //! - **HTML rendering**: Converting HTML to readable terminal text via html2text
 //! - **Link rendering**: Displaying clickable links with numbered annotations
 
-use super::util::terminal_width;
+use crate::term::terminal_width;
 
 // ============================================================================
 // PUBLIC API
@@ -23,8 +23,11 @@ pub fn render_html(html: &str) -> Vec<String> {
 }
 
 /// Render HTML to plain text at a specific width.
+/// Uses plain config to avoid appending link URLs at the end (CurlUp has its own link system).
 pub fn render_html_to_width(html: &str, width: usize) -> Vec<String> {
-    match html2text::from_read(html.as_bytes(), width) {
+    match html2text::config::plain()
+        .string_from_read(html.as_bytes(), width)
+    {
         Ok(text) => text.lines().map(|s| s.to_string()).collect(),
         Err(_) => vec!["[Error rendering HTML]".to_string()],
     }

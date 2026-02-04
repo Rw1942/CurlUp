@@ -56,36 +56,44 @@ async fn main() -> Result<()> {
         } else {
             dom::extract::extract_page_content(&client, &current_url, focus).await?
         };
-        let link_count = content.links.len();
 
         // Build output lines - use markdown or plain text rendering
         let output_lines = if args.markdown {
-            render::markdown::render_html_to_markdown(&content.html)
+            let mut lines = render::markdown::render_html_to_markdown(&content.html);
+            // Add links as markdown references
+            if !content.links.is_empty() {
+                lines.push(String::new());
+                lines.push("## Links".to_string());
+                lines.push(String::new());
+                for (i, link) in content.links.iter().take(20).enumerate() {
+                    lines.push(format!("[{}]: {} \"{}\"", i + 1, link.href, link.text));
+                }
+            }
+            lines
         } else {
-            render::text::render_html(&content.html)
-        };
-
-        // Add footer (skip for markdown mode to keep output clean for piping)
-        let footer = if args.markdown {
-            String::new()
-        } else {
-            format!(
-                "\n────────────────────────────────────────────────────────────\n  {} links found. Run without -s/-r/-p for interactive browsing.",
-                link_count
-            )
+            let lines = render::text::render_html(&content.html);
+            // Add plain link list for non-raw mode
+            if !args.raw && !content.links.is_empty() {
+                let mut with_links = lines;
+                with_links.push(String::new());
+                with_links.push("--- Links ---".to_string());
+                for (i, link) in content.links.iter().take(20).enumerate() {
+                    with_links.push(format!("[{}] {} -> {}", i + 1, link.text, link.href));
+                }
+                with_links
+            } else {
+                lines
+            }
         };
 
         if args.pager {
             // Pager mode - pipe to system pager
-            let output = output_lines.join("\n") + &footer + "\n";
+            let output = output_lines.join("\n") + "\n";
             output_to_pager(&output)?;
         } else {
             // Direct output to stdout
             for line in output_lines {
                 println!("{}", line);
-            }
-            if !footer.is_empty() {
-                println!("{}", footer);
             }
         }
     } else {

@@ -12,6 +12,12 @@ alwaysApply: true
 - Handle WebDriver lifecycles cleanly: startup, timeouts, teardown, retries.
 - Update `README.md` and `docs/guide.md` for user-facing CLI changes or behavior tweaks.
 - Documentation lives under `docs/`; keep `docs/README.md` current when adding files.
-- Do not check in generated artifacts (`target/`, `release/`) or OS metadata files.
 - When adding CLI flags, update `README.md` usage and examples.
 - GitHub repo: https://github.com/Rw1942/CurlUp.git
+
+## Build Conventions
+
+- All builds go in `target/` (Cargo standard). Never create custom build directories.
+- Debug build: `cargo build` → `target/debug/curlup`
+- Release build: `cargo build --release` → `target/release/curlup`
+- Do not check in `target/` or any build artifacts.
