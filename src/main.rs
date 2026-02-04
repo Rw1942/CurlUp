@@ -45,8 +45,12 @@ async fn main() -> Result<()> {
         // Single page mode - fetch once and exit
         browser::navigation::navigate_and_wait_with_stealth(&client, &current_url, stealth).await?;
 
-        // Extract content including links
-        let content = dom::extract::extract_page_content(&client, &current_url).await?;
+        // Extract content including links (use multilens if enabled)
+        let content = if args.multilens {
+            dom::multilens::extract_multilens(&client, &current_url).await?
+        } else {
+            dom::extract::extract_page_content(&client, &current_url).await?
+        };
         let link_count = content.links.len();
 
         // Render to terminal (condensed by default, raw if requested)
@@ -64,7 +68,7 @@ async fn main() -> Result<()> {
         // Interactive browsing mode (default)
         // This loop allows returning to the start screen with 'home' command
         loop {
-            match browse::run_interactive_with_stealth(&client, &current_url, stealth).await {
+            match browse::run_interactive_with_options(&client, &current_url, stealth, args.multilens).await {
                 Ok(()) => {
                     // User exited browse mode (quit or home)
                     // Try to show start screen again

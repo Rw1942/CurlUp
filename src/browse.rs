@@ -13,6 +13,7 @@ use std::io::{self, Write};
 use crate::browser;
 use crate::dom::content::PageContent;
 use crate::dom::extract::extract_page_content;
+use crate::dom::multilens::extract_multilens;
 use crate::render::text::render_with_links_limited;
 use crate::term::{clear_line, clear_screen, content_area_height, move_cursor, terminal_height, terminal_width};
 
@@ -28,7 +29,7 @@ pub async fn run_interactive(
     client: &fantoccini::Client,
     initial_url: &str,
 ) -> Result<()> {
-    run_interactive_with_stealth(client, initial_url, true).await
+    run_interactive_with_options(client, initial_url, true, false).await
 }
 
 /// Run the interactive browsing session with stealth mode option
@@ -36,6 +37,16 @@ pub async fn run_interactive_with_stealth(
     client: &fantoccini::Client,
     initial_url: &str,
     stealth: bool,
+) -> Result<()> {
+    run_interactive_with_options(client, initial_url, stealth, false).await
+}
+
+/// Run the interactive browsing session with all options
+pub async fn run_interactive_with_options(
+    client: &fantoccini::Client,
+    initial_url: &str,
+    stealth: bool,
+    multilens: bool,
 ) -> Result<()> {
     let mut history: Vec<HistoryEntry> = Vec::new();
     let mut current_url = initial_url.to_string();
@@ -51,8 +62,12 @@ pub async fn run_interactive_with_stealth(
         browser::navigation::navigate_and_wait_with_stealth(client, &current_url, stealth).await?;
         browser::navigation::scroll_to_top_after_load(client).await?;
         
-        // Extract content with links
-        let content = extract_page_content(client, &current_url).await?;
+        // Extract content with links (use multilens if enabled)
+        let content = if multilens {
+            extract_multilens(client, &current_url).await?
+        } else {
+            extract_page_content(client, &current_url).await?
+        };
         
         // Clear screen and show header
         clear_screen();
@@ -354,9 +369,9 @@ fn links_summary_line(content: &PageContent, show_tip: bool) -> String {
     } else {
         let shown = link_count.min(20);
         if link_count > shown {
-            format!("{} links inline (1-{})", shown, shown)
+            format!("{} of {} links inline (1-{})", shown, link_count, shown)
         } else {
-            format!("{} links inline (1-{})", shown, shown)
+            format!("{} links inline (1-{})", link_count, link_count)
         }
     };
 

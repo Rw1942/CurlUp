@@ -1,37 +1,59 @@
-# Architecture Overview
+# Architecture
 
-## Purpose
-CurlUp is a browser orchestrator + text renderer. Chrome renders pages; Rust coordinates lifecycle, extraction, and output.
+## Core Idea
 
-## High-Level Flow
-1. Launch or connect to ChromeDriver.
-2. Navigate to the target URL and wait for readiness.
-3. Extract DOM text and links inside the browser.
-4. Parse and format text into structured terminal output.
-5. Render content and interactive link controls.
+CurlUp orchestrates Chrome to render pages, then extracts the text. Chrome handles JavaScript, auth, cookies. Rust handles lifecycle and output.
 
-## Module Boundaries
+## Data Flow
 
 ```
-src/
-├── browse.rs          # Interactive browsing loop
-├── cli.rs             # CLI parsing
-├── picker.rs          # Start screen and curated sites
-├── term.rs            # Terminal helpers (screen/layout)
-├── browser/
-│   ├── chrome.rs      # WebDriver connection
-│   ├── driver.rs      # ChromeDriver process lifecycle
-│   └── navigation.rs  # Page navigation + readiness + scroll
-├── dom/
-│   ├── content.rs     # Link + PageContent types
-│   └── extract.rs     # DOM extraction (text + links)
-└── render/
-    └── text.rs        # Render API + parsing pipeline
-        └── text/      # Submodules (links, util, parsing helpers)
+User runs curlup
+       │
+       ▼
+Spawn ChromeDriver (port 9515)
+       │
+       ▼
+Connect via WebDriver protocol
+       │
+       ▼
+Navigate + wait for page ready
+       │
+       ▼
+Inject stealth JS (hide automation)
+       │
+       ▼
+Scroll to trigger lazy content
+       │
+       ▼
+Extract text + links
+       │
+       ▼
+Render to terminal
 ```
 
-## Key Design Choices
-- **Chrome is the source of truth**: no HTML parsing in Rust.
-- **Small modules**: each module maps to a clear concept.
-- **Explicit errors**: prefer `Result` and typed errors for internal flow.
-- **Terminal-first UX**: rendering and controls stay readable and consistent.
+## Module Map
+
+| Module | Job |
+|--------|-----|
+| `cli` | Parse arguments |
+| `browser/driver` | Start/stop ChromeDriver |
+| `browser/chrome` | Connect, configure stealth |
+| `browser/navigation` | Load pages, wait for ready |
+| `dom/extract` | Standard innerText extraction |
+| `dom/multilens` | Smart content extraction |
+| `render/text` | Terminal formatting |
+| `browse` | Interactive loop |
+| `picker` | Start screen menu |
+
+## Extraction Modes
+
+**Standard:** Single JS call gets `document.body.innerText`. Fast, simple.
+
+**Multi-lens (`-m`):** Fetches full HTML, parses in Rust, runs 4 strategies, picks best result.
+
+## Design Principles
+
+1. **Chrome is truth** - Don't reimplement browser features
+2. **Small modules** - One concept per file
+3. **Explicit errors** - Use `Result`, no panics
+4. **Terminal-first** - Clean, readable output

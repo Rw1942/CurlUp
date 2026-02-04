@@ -22,6 +22,7 @@ EXAMPLES:
     curlup -v mail.google.com           Visible browser for login
     curlup --user-agent "MyBot/1.0"     Use custom user-agent
     curlup --no-stealth -v              Debug mode without stealth
+    curlup -m medium.com/article        Multi-lens extraction for better content
 
 REQUIREMENTS:
     • Google Chrome installed
@@ -50,4 +51,8 @@ pub struct Cli {
     /// Disable stealth mode (anti-detection measures)
     #[arg(long)]
     pub no_stealth: bool,
+
+    /// Use multi-lens content extraction (CSS, ARIA, text-density heuristics)
+    #[arg(long, short = 'm')]
+    pub multilens: bool,
 }

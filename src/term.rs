@@ -1,3 +1,4 @@
+use console::Term;
 use std::io::{self, Write};
 
 /// Clear terminal screen and move cursor to top-left.
@@ -16,23 +17,16 @@ pub fn clear_line() {
     print!("\x1b[2K");
 }
 
-/// Get terminal width with a conservative cap.
+/// Get terminal width by querying the terminal directly.
 pub fn terminal_width() -> usize {
-    std::env::var("COLUMNS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(80)
-        .min(100)
+    let (_, cols) = Term::stdout().size();
+    (cols as usize).max(40)
 }
 
-/// Get terminal height with a conservative cap.
+/// Get terminal height by querying the terminal directly.
 pub fn terminal_height() -> usize {
-    std::env::var("LINES")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(24)
-        .max(10)
-        .min(80)
+    let (rows, _) = Term::stdout().size();
+    (rows as usize).max(10)
 }
 
 /// Compute usable content height for scrolling output.

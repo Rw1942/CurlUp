@@ -1,8 +1,15 @@
+//! Browser navigation utilities.
+//!
+//! Handles page navigation with:
+//! - Stealth mode to avoid bot detection
+//! - Smart wait for content stability (replaces fixed delays)
+//! - Scroll handling for lazy-loaded content
+
 use anyhow::Result;
 use fantoccini::Client;
 use std::time::Duration;
 
-/// JavaScript to inject for stealth mode - hides automation indicators
+/// JavaScript to inject for stealth mode - hides automation indicators.
 const STEALTH_JS: &str = r#"
     // Hide webdriver property
     Object.defineProperty(navigator, 'webdriver', {
@@ -39,6 +46,48 @@ const STEALTH_JS: &str = r#"
     );
 "#;
 
+/// JavaScript that waits for content to stabilize.
+/// 
+/// Polls document.body.innerText.length until it stops changing,
+/// indicating that dynamic content has finished loading.
+/// Returns early if content stabilizes, with a max timeout of 5 seconds.
+const WAIT_FOR_CONTENT_JS: &str = r#"
+return new Promise(function(resolve) {
+    var maxWait = 5000;      // Maximum wait time (ms)
+    var pollInterval = 300;  // How often to check (ms)
+    var stableCount = 0;     // Consecutive stable readings needed
+    var stableThreshold = 2; // How many stable readings = done
+    var lastLength = -1;
+    var elapsed = 0;
+    
+    function check() {
+        if (elapsed >= maxWait) {
+            resolve(true);
+            return;
+        }
+        
+        var currentLength = document.body ? document.body.innerText.length : 0;
+        
+        if (currentLength === lastLength && currentLength > 0) {
+            stableCount++;
+            if (stableCount >= stableThreshold) {
+                resolve(true);
+                return;
+            }
+        } else {
+            stableCount = 0;
+        }
+        
+        lastLength = currentLength;
+        elapsed += pollInterval;
+        setTimeout(check, pollInterval);
+    }
+    
+    // Start checking after initial delay for JS to begin executing
+    setTimeout(check, 500);
+});
+"#;
+
 /// Navigate to URL and wait for page to be fully ready (with stealth enabled).
 #[allow(dead_code)]
 pub async fn navigate_and_wait(client: &Client, url: &str) -> Result<()> {
@@ -46,6 +95,12 @@ pub async fn navigate_and_wait(client: &Client, url: &str) -> Result<()> {
 }
 
 /// Navigate to URL with optional stealth mode.
+/// 
+/// Uses smart content detection instead of fixed delays:
+/// 1. Navigate to the URL
+/// 2. Inject stealth scripts (if enabled)
+/// 3. Wait for document.readyState === 'complete'
+/// 4. Wait for content to stabilize (no more changes to innerText)
 pub async fn navigate_and_wait_with_stealth(client: &Client, url: &str, stealth: bool) -> Result<()> {
     client.goto(url).await?;
 
@@ -69,8 +124,8 @@ pub async fn navigate_and_wait_with_stealth(client: &Client, url: &str, stealth:
         let _ = client.execute(STEALTH_JS, vec![]).await;
     }
 
-    // Fixed buffer for JS rendering
-    tokio::time::sleep(Duration::from_millis(3000)).await;
+    // Smart wait: poll until content stabilizes instead of fixed delay
+    let _ = client.execute(WAIT_FOR_CONTENT_JS, vec![]).await;
 
     Ok(())
 }

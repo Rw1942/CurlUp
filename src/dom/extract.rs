@@ -1,26 +1,27 @@
-//! DOM content extraction using Readability on rendered HTML.
+//! DOM content extraction from rendered pages.
 //!
-//! Extraction pipeline:
-//! 1. Chrome renders the page (JavaScript executes)
-//! 2. Get the rendered HTML
-//! 3. Try Readability algorithm to extract main content
-//! 4. Fall back to body text if Readability returns sparse content
-//! 5. Clean up extracted text
+//! Extraction is done in a single WebDriver call that retrieves:
+//! - All visible text via innerText
+//! - All meaningful links from the page
 //!
-//! This works for both static and dynamic pages.
+//! The text is then cleaned to remove boilerplate and junk lines.
 
 use anyhow::Result;
 use fantoccini::Client;
-use readability::extractor;
 use serde::Deserialize;
-use std::io::Cursor;
-use url::Url;
 
 use super::content::{Link, PageContent};
 
-/// Minimum lines for Readability result to be considered "good enough".
-/// Below this threshold, we fall back to body text extraction.
-const MIN_CONTENT_LINES: usize = 3;
+/// Raw extraction result from the consolidated JavaScript call.
+#[derive(Debug, Deserialize, Default)]
+struct ExtractResult {
+    /// All visible text from document.body.innerText
+    #[serde(default)]
+    text: String,
+    /// Extracted links
+    #[serde(default)]
+    links: Vec<RawLink>,
+}
 
 #[derive(Debug, Deserialize)]
 struct RawLink {
@@ -30,104 +31,83 @@ struct RawLink {
     href: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Default)]
-struct LinkExtractResult {
-    #[serde(default)]
-    links: Option<Vec<RawLink>>,
-}
-
-/// Extract page content including text and links.
-pub async fn extract_page_content(client: &Client, current_url: &str) -> Result<PageContent> {
-    // Step 1: Get rendered HTML
-    let html = get_rendered_html(client).await?;
-
-    // Step 2: Try Readability extraction
-    let mut lines = extract_with_readability(&html, current_url);
-
-    // Step 3: If Readability returned sparse content, fall back to body text
-    // This handles sites like Hacker News that use table-based layouts
-    if lines.len() < MIN_CONTENT_LINES {
-        if let Ok(fallback) = extract_body_text(client).await {
-            if fallback.len() > lines.len() {
-                lines = fallback;
-            }
-        }
+/// JavaScript that extracts text and links in one call.
+/// 
+/// This consolidates what was previously 2-3 separate WebDriver calls
+/// into a single round-trip for better performance.
+const EXTRACT_JS: &str = r#"
+return (function() {
+    var result = { text: '', links: [] };
+    
+    // Get all visible text
+    if (document.body) {
+        result.text = document.body.innerText || '';
     }
+    
+    // Extract meaningful links
+    var seen = {};
+    document.querySelectorAll('a[href]').forEach(function(a) {
+        var href = a.href;
+        var text = (a.innerText || '').trim();
+        
+        // Skip short or overly long text
+        if (text.length < 8 || text.length > 200) return;
+        
+        // Skip javascript: and anchor-only links
+        if (href.indexOf('javascript:') === 0) return;
+        if (href === window.location.href) return;
+        if (href.indexOf('#') === href.length - 1) return;
+        
+        // Skip duplicates
+        if (seen[href]) return;
+        
+        // Skip if inside nav/header/footer
+        var parent = a.closest('nav, header, footer, [role="navigation"]');
+        if (parent) return;
+        
+        seen[href] = true;
+        result.links.push({ text: text, href: href });
+    });
+    
+    return result;
+})();
+"#;
 
-    // Step 4: Clean up the extracted text
-    let lines = clean_text(lines);
+/// Extract page content (text and links) in a single WebDriver call.
+pub async fn extract_page_content(client: &Client, current_url: &str) -> Result<PageContent> {
+    // Single consolidated extraction call
+    let result = client.execute(EXTRACT_JS, vec![]).await?;
+    let extracted: ExtractResult = serde_json::from_value(result).unwrap_or_default();
 
-    // Step 5: Extract links
-    let links = extract_links(client).await?;
+    // Process text into clean lines
+    let lines = clean_text(&extracted.text);
+
+    // Convert raw links to typed Links
+    let links = extracted
+        .links
+        .into_iter()
+        .filter_map(|l| match (l.text, l.href) {
+            (Some(text), Some(href)) if !text.is_empty() && !href.is_empty() => {
+                Some(Link { text, href })
+            }
+            _ => None,
+        })
+        .collect();
 
     Ok(PageContent::new(current_url.to_string(), lines, links))
-}
-
-// ============================================================================
-// HTML Extraction
-// ============================================================================
-
-/// Get rendered HTML from the DOM.
-async fn get_rendered_html(client: &Client) -> Result<String> {
-    let script = "return document.documentElement.outerHTML;";
-    let result = client.execute(script, vec![]).await?;
-
-    match result.as_str() {
-        Some(html) => Ok(html.to_string()),
-        None => Ok(client.source().await?),
-    }
-}
-
-// ============================================================================
-// Content Extraction
-// ============================================================================
-
-/// Extract main content using Mozilla's Readability algorithm.
-/// Works well for article-style pages with semantic HTML.
-fn extract_with_readability(html: &str, url_str: &str) -> Vec<String> {
-    let url = match Url::parse(url_str) {
-        Ok(u) => u,
-        Err(_) => return vec!["[Invalid URL]".to_string()],
-    };
-
-    let mut cursor = Cursor::new(html.as_bytes());
-    match extractor::extract(&mut cursor, &url) {
-        Ok(product) => product
-            .text
-            .lines()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect(),
-        Err(_) => vec![],
-    }
-}
-
-/// Fallback: extract all visible text from the page body.
-/// Used when Readability fails (e.g., table-based layouts like Hacker News).
-async fn extract_body_text(client: &Client) -> Result<Vec<String>> {
-    let script = "return document.body ? document.body.innerText : '';";
-
-    let result = client.execute(script, vec![]).await?;
-    let text = result.as_str().unwrap_or("");
-
-    Ok(text
-        .lines()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect())
 }
 
 // ============================================================================
 // Text Cleanup
 // ============================================================================
 
-/// Clean up extracted text lines.
-fn clean_text(lines: Vec<String>) -> Vec<String> {
-    lines
-        .into_iter()
+/// Parse and clean text content into lines.
+fn clean_text(text: &str) -> Vec<String> {
+    text.lines()
+        .map(|s| s.trim().to_string())
         .filter(|line| {
             let trimmed = line.trim();
-            trimmed.len() >= 2 && !is_junk_line(trimmed)
+            !trimmed.is_empty() && trimmed.len() >= 2 && !is_junk_line(trimmed)
         })
         .collect()
 }
@@ -151,66 +131,4 @@ fn is_junk_line(line: &str) -> bool {
     ];
 
     junk_patterns.iter().any(|p| lower.contains(p))
-}
-
-// ============================================================================
-// Link Extraction
-// ============================================================================
-
-/// Extract links via JavaScript.
-/// Skips links inside nav/header/footer elements.
-async fn extract_links(client: &Client) -> Result<Vec<Link>> {
-    let script = r#"
-        return (function() {
-            if (!document.body) return { links: [] };
-            
-            var links = [];
-            var seen = {};
-            
-            document.querySelectorAll('a[href]').forEach(function(a) {
-                var href = a.href;
-                var text = (a.innerText || '').trim();
-                
-                // Skip based on text length
-                if (text.length < 3 || text.length > 200) return;
-                
-                // Skip javascript: and anchor-only links
-                if (href.indexOf('javascript:') === 0) return;
-                if (href === window.location.href) return;
-                if (href.indexOf('#') === href.length - 1) return;
-                
-                // Skip duplicates
-                if (seen[href]) return;
-                
-                // Skip if link is inside nav/header/footer
-                var parent = a.closest('nav, header, footer, [role="navigation"]');
-                if (parent) return;
-                
-                seen[href] = true;
-                links.push({ text: text, href: href });
-            });
-            
-            return { links: links };
-        })();
-    "#;
-
-    let result = client.execute(script, vec![]).await?;
-
-    if result.is_null() {
-        return Ok(vec![]);
-    }
-
-    let extracted: LinkExtractResult = serde_json::from_value(result).unwrap_or_default();
-
-    Ok(extracted
-        .links
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|l| match (l.text, l.href) {
-            (Some(text), Some(href)) if !text.is_empty() && !href.is_empty() => {
-                Some(Link { text, href })
-            }
-            _ => None,
-        })
-        .collect())
 }

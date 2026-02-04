@@ -1,18 +1,9 @@
-use std::env;
+use console::Term;
 
-/// Get the current terminal width.
-///
-/// Reads from the `COLUMNS` environment variable, defaulting to 80 columns
-/// if not set. This is the standard way to detect terminal width in Unix.
-///
-/// # Returns
-/// Terminal width in characters (minimum 40, default 80)
+/// Get terminal width by querying the terminal directly.
 pub(super) fn terminal_width() -> usize {
-    env::var("COLUMNS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(80)
-        .max(40) // Minimum usable width
+    let (_, cols) = Term::stdout().size();
+    (cols as usize).max(40)
 }
 
 /// Check if text appears to be ASCII art or preformatted content.

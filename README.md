@@ -1,432 +1,203 @@
 # CurlUp
 
-A terminal web browser that lets you browse the web by clicking numbered links. CurlUp renders pages using Chrome, displays the text in your terminal, and lets you navigate by entering link numbers.
+A terminal web browser. CurlUp uses Chrome to render pages and shows you the text with numbered links.
 
-Repository: https://github.com/Rw1942/CurlUp.git
+## First Time Setup
 
-## Why CurlUp?
+You need three things: **Chrome**, **ChromeDriver**, and **Rust**.
 
-- **Browse the web from your terminal** - Navigate sites by typing link numbers
-- **Real browser rendering** - JavaScript, SPAs, and dynamic content work out of the box
-- **Beautiful start screen** - Pick from popular sites or enter any URL
-- **Back navigation** - Browse history lets you go back to previous pages
-- **Zero API hacking** - If Chrome can render it, CurlUp can read it
+### Step 1: Make sure Chrome is installed
 
-## Quick Start
+You probably already have it. If not, download from https://google.com/chrome
 
-```bash
-# Just run curlup - pick a site and start browsing!
-curlup
+### Step 2: Install ChromeDriver
 
-# Or go directly to a site
-curlup news.ycombinator.com
+ChromeDriver lets CurlUp control Chrome. It must match your Chrome version.
 
-# For scripts/piping, use single-page mode
-curlup -s news.google.com | less
-```
-
-## Installation
-
-### Prerequisites
-
-1. **Rust toolchain** (1.70+)
-   ```bash
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   ```
-
-2. **Google Chrome** - Any recent version
-
-3. **ChromeDriver** - Must match your Chrome version
-
-### Installing ChromeDriver
-
-#### macOS (Homebrew)
+**macOS:**
 ```bash
 brew install chromedriver
+
+# Fix the quarantine warning (required on macOS)
+xattr -d com.apple.quarantine $(which chromedriver)
 ```
 
-#### macOS (Manual)
+**Linux (Debian/Ubuntu):**
 ```bash
-# Check your Chrome version: Chrome → About Google Chrome
-# Download matching ChromeDriver from https://googlechromelabs.github.io/chrome-for-testing/
-
-# Install to ~/.local/bin (CurlUp checks here first)
-mkdir -p ~/.local/bin
-mv chromedriver ~/.local/bin/
-chmod +x ~/.local/bin/chromedriver
-
-# On macOS, remove quarantine attribute
-xattr -d com.apple.quarantine ~/.local/bin/chromedriver
-```
-
-#### Linux
-```bash
-# Debian/Ubuntu
 sudo apt install chromium-chromedriver
-
-# Or download from https://googlechromelabs.github.io/chrome-for-testing/
 ```
 
-#### Windows
-```powershell
-# Download from https://googlechromelabs.github.io/chrome-for-testing/
-# Add to PATH or place in a directory on your PATH
-```
+**Manual install (any OS):**
+1. Check your Chrome version: `Chrome menu > About Google Chrome`
+2. Download matching ChromeDriver from https://googlechromelabs.github.io/chrome-for-testing/
+3. Put it in `~/.local/bin/` or somewhere in your PATH
 
-### Building CurlUp
+### Step 3: Install Rust (if you don't have it)
 
 ```bash
-git clone <repository-url>
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+```
+
+### Step 4: Build CurlUp
+
+```bash
+git clone https://github.com/Rw1942/CurlUp.git
 cd CurlUp
 cargo build --release
-
-# Binary is at target/release/curlup
-# Optionally, copy to your PATH:
-cp target/release/curlup ~/.local/bin/
 ```
 
-Build artifacts live under `target/`. If you create packaged releases under `release/`,
-keep them out of version control (they are generated outputs).
+### Step 5: Run it
 
-## Documentation
+```bash
+# From the project directory:
+./target/release/curlup
 
-- [Documentation index](docs/README.md)
-- [Architecture overview](docs/architecture.md)
+# Or copy to your PATH for global access:
+cp target/release/curlup ~/.local/bin/
+curlup
+```
 
-## Usage
+### Verify it works
+
+```bash
+curlup news.ycombinator.com
+```
+
+You should see Hacker News rendered as text with numbered links. Type `1` to follow the first link, `b` to go back, `q` to quit.
+
+---
+
+## Quick Reference
+
+```bash
+curlup                          # Start with site picker
+curlup news.ycombinator.com     # Go directly to a site
+curlup -s example.com | less    # Single page mode (for piping)
+curlup -m medium.com/article    # Multi-lens mode (cleaner articles)
+curlup -v mail.google.com       # Visible browser (for login)
+```
+
+### While Browsing
+
+| Key | What it does |
+|-----|--------------|
+| `1-20` | Follow that link |
+| `b` | Go back |
+| `r` | Refresh |
+| `u` | Show current URL |
+| `h` | Help |
+| `q` | Quit |
+| `google.com` | Go to any URL |
+
+### All Options
 
 ```
 curlup [OPTIONS] [URL]
 
-Arguments:
-  [URL]  URL to navigate to (optional - shows site picker if omitted)
-
-Options:
-  -s, --single              Single-page mode (fetch once and exit, good for piping)
-  -v, --visible             Launch Chrome in visible mode (useful for login/debug)
-  -r, --raw                 Raw output mode (no formatting - implies --single)
-  -u, --user-agent <STRING> Custom user-agent string (overrides default)
-      --no-stealth          Disable stealth mode (anti-detection measures)
-  -h, --help                Print help
-  -V, --version             Print version
+  -s, --single       Fetch once and exit (good for piping)
+  -r, --raw          Raw output, no formatting (implies -s)
+  -m, --multilens    Smart extraction for articles
+  -v, --visible      Show the browser window
+  -u, --user-agent   Custom user-agent string
+      --no-stealth   Disable anti-bot measures
+  -h, --help         Show help
 ```
 
-### Stealth Mode
+---
 
-CurlUp includes built-in stealth mode (enabled by default) to avoid being detected as a headless browser by websites. This helps access sites that block automated browsers.
-
-**What stealth mode does:**
-- Sets a realistic Chrome user-agent string
-- Disables `navigator.webdriver` property detection
-- Removes automation indicators (`enable-automation` switch)
-- Masks browser plugins and language properties
-- Uses a realistic window size (1920x1080)
-
-**Custom user-agent:**
-```bash
-# Override with your own user-agent
-curlup --user-agent "MyBot/1.0 (+https://example.com/bot)"
-curlup -u "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/145.0.0.0"
-```
-
-**Disable stealth for debugging:**
-```bash
-curlup --no-stealth -v  # Visible browser, no anti-detection
-```
-
-### How It Works
-
-**1. Start Screen**
-
-Run `curlup` to see the welcome screen with popular sites:
-
-```
-    ╭─────────────────────────────────────────╮
-    │      ██████╗██╗   ██╗██████╗ ██╗        │
-    │     ██╔════╝██║   ██║██╔══██╗██║        │
-    │     ██║     ██║   ██║██████╔╝██║        │
-    │     ╚██████╗╚██████╔╝██║  ██║███████╗   │
-    │       Terminal Web Browser v0.1         │
-    ╰─────────────────────────────────────────╯
-
-  Popular Sites
-
-  🔶  1. Hacker News          [Tech]
-  📰  2. Google News          [News]
-  ⭐  3. GitHub Trending      [Dev]
-  💬  4. Reddit Programming   [Community]
-  ...
-  🔗 11. Enter a custom URL...
-```
-
-**2. Browse Pages with Numbered Links**
-
-Once you pick a site, CurlUp shows the page content with clickable links:
-
-```
-────────────────────────────────────────────────────────────────────
-  CurlUp ← 1 https://news.ycombinator.com
-────────────────────────────────────────────────────────────────────
-
-━━ TOP STORIES ━━
-
- 1. Show HN: I built a terminal browser
-    239 points · 4 hours ago · 90 comments
-
- 2. The future of programming languages
-    189 points · 6 hours ago · 156 comments
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  🔗 12 Links (enter a number to follow)
-
-   1 Show HN: I built a terminal browser
-   2 The future of programming languages
-   3 Comments (90)
-   ...
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  → q:quit h:help b:back 1-12:link _
-```
-
-**3. Navigate by Entering Numbers**
-
-| Input | Action |
-|-------|--------|
-| `1-20` | Follow that link |
-| `b` | Go back to previous page |
-| `r` | Refresh current page |
-| `u` | Show current URL |
-| `google.com` | Go directly to any URL |
-| `home` | Return to site picker |
-| `h` | Show help |
-| `q` | Quit |
-
-When a new page is loaded, CurlUp briefly scrolls to trigger lazy-loaded content and then returns to the top before rendering. The link summary and prompt stay visible in a sticky bottom bar so you always know what to do next.
-
-### Examples
-
-```bash
-# Start with site picker, then browse interactively
-curlup
-
-# Go directly to a site and browse
-curlup news.ycombinator.com
-curlup github.com/trending
-curlup en.wikipedia.org
-
-# Single-page mode (for piping to other tools)
-curlup -s news.google.com | less
-curlup -s example.com | grep "keyword"
-
-# Raw output for scripting
-curlup -s -r news.google.com > output.txt
-
-# Visible browser (for sites requiring login)
-curlup -v mail.google.com
-
-# Local development
-curlup localhost:3000
-```
-
-### Output Modes
-
-**Formatted (default)**: Terminal-optimized output with visual hierarchy
-```
-───────────────────────────────────────────────────────────────────
-  Boulder — 46°F
-  Forecast: Thu 63°/38°  Fri 59°/40°
-───────────────────────────────────────────────────────────────────
-
-━━ TOP STORIES ━━
-
-  • House passes funding package to end partial government shutdown
-    [ABC News] (2 hours ago)
-
-  • Live updates: House begins votes to end government shutdown
-    [CNN] (1 hour ago)
-
-  Dow Jones 49,240.99 ▼ -0.34%
-
-━━ LOCAL NEWS ━━
-
-  • Boulder protects nesting eagles: Seasonal closures in effect
-    [9News] (4 hours ago)
-```
-
-**Raw (`-r`)**: Shows every line separately (useful for scripting)
-```
-ABC News
-More
-House passes funding package to end shutdown
-2 hours ago
-By Lauren Peller
-```
-
-### Terminal Features
-
-- **Auto line wrapping**: Respects your terminal width (reads `$COLUMNS`)
-- **Visual sections**: Clear separators between content types
-- **Weather formatting**: Compact forecast display
-- **News hierarchy**: Headlines with source/timestamp metadata
-- **Stock tickers**: Clean formatting with up/down indicators
-
-## How It Works
-
-```
-┌─────────────┐
-│   CurlUp    │  You run: curlup <url>
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│ ChromeDriver│  Spawned automatically in background
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│   Chrome    │  Renders page (headless by default)
-│  (headless) │  JavaScript executes, DOM builds
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│ Page Ready  │  Waits for readyState + content
-│   Check     │  with retry and backoff
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  DOM Text   │  Extracts visible text content
-│  Extraction │  via document.body.innerText
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  Terminal   │  Clean text output
-└─────────────┘
-```
-
-## Troubleshooting
+## Common Issues
 
 ### "ChromeDriver not found"
 
-CurlUp searches for ChromeDriver in this order:
+CurlUp looks for ChromeDriver in:
 1. `~/.local/bin/chromedriver`
-2. System PATH
+2. Anywhere in your PATH
 
-Make sure ChromeDriver is installed and accessible:
+Check with:
 ```bash
-# Check if chromedriver is found
 which chromedriver
-
-# Or verify the local path exists
-ls ~/.local/bin/chromedriver
 ```
 
-### "session not created: This version of ChromeDriver only supports Chrome version X"
+### "ChromeDriver version mismatch"
 
-Your ChromeDriver version doesn't match your Chrome version. Download the matching version from:
-https://googlechromelabs.github.io/chrome-for-testing/
+Your ChromeDriver version must match Chrome. Check your Chrome version (`Chrome > About`) and download the matching driver from https://googlechromelabs.github.io/chrome-for-testing/
 
-Check your Chrome version: `Chrome menu → About Google Chrome`
+### "Operation not permitted" (macOS)
 
-### "ChromeDriver failed to start within 10 seconds"
+Remove the quarantine flag:
+```bash
+xattr -d com.apple.quarantine $(which chromedriver)
+```
 
-- Check if another ChromeDriver process is running: `pkill chromedriver`
-- Verify ChromeDriver works manually: `chromedriver --port=9515`
-- On macOS, ensure quarantine is removed: `xattr -d com.apple.quarantine ~/.local/bin/chromedriver`
+### ChromeDriver won't start
 
-### Page content looks incomplete
+Kill any stuck processes and try again:
+```bash
+pkill chromedriver
+curlup example.com
+```
 
-CurlUp uses a robust 3-step approach to wait for JavaScript-heavy pages:
-1. Waits for `document.readyState === 'complete'`
-2. Polls until the page body has actual text content (up to 5 seconds)
-3. Retries content extraction with backoff if initial attempt fails
+### Page content looks wrong
 
-If content still appears incomplete, the site may be loading content via infinite scroll or lazy loading that requires user interaction.
+Try multi-lens mode for cleaner extraction:
+```bash
+curlup -m thesite.com
+```
+
+Or use visible mode to see what's happening:
+```bash
+curlup -v thesite.com
+```
+
+---
+
+## Multi-Lens Mode
+
+Use `-m` for articles, blog posts, and documentation. It runs four extraction strategies and picks the best result:
+
+- CSS selectors (finds `<article>`, `<main>`, etc.)
+- DOM traversal (skips nav, footer, sidebars)
+- Text density analysis (finds content-heavy blocks)
+- ARIA landmarks (uses accessibility markup)
+
+```bash
+curlup -m medium.com/@user/some-article
+curlup -m -s docs.python.org/3/tutorial | less
+```
+
+---
+
+## Sites That Work Well
+
+- **News:** Hacker News, Google News, BBC, NPR, Reuters
+- **Tech:** GitHub, Ars Technica, TechCrunch, dev.to
+- **Docs:** MDN, Python docs, Read the Docs
+- **Reference:** Wikipedia, IMDb, Merriam-Webster
+- **Weather:** wttr.in (ASCII art preserved)
+
+**Needs login (use `-v`):** Gmail, LinkedIn, Medium, Twitter
+
+**Blocked:** Product Hunt (Cloudflare)
+
+---
 
 ## Development
 
 ```bash
-# Run in development
-cargo run -- https://example.com
-
-# Run tests
-cargo test
-
-# Check for issues
-cargo clippy
+cargo run -- example.com     # Run in dev mode
+cargo test                   # Run tests
+cargo clippy                 # Lint
 ```
 
-## Architecture
+See [docs/](docs/) for architecture details.
 
-CurlUp's text parsing engine is designed for extensibility. The core pipeline:
-
-```
-Raw Lines → Filter → Parse → Render
-    │          │        │       │
-    │          │        │       └─► Terminal output with formatting
-    │          │        └─► ContentBlock enum (structured data)
-    │          └─► Remove noise, icons, UI elements
-    └─► Vec<String> from DOM extraction
-```
-
-### Content Types
-
-The parser recognizes these content patterns (see `src/render/text.rs`):
-
-| Type | Example | Detection |
-|------|---------|-----------|
-| `NewsItem` | Headline with source/timestamp | Known sources + headline length |
-| `NumberedItem` | HN-style "1. Title" lists | Number + period pattern |
-| `Weather` | Temperature + forecast | °F/°C patterns + day names |
-| `StockTicker` | "Dow Jones 49,240 ▲ +0.5%" | Known symbols + percentage |
-| `SectionHeader` | "TOP STORIES" | Known header list |
-| `Preformatted` | ASCII art, tables | Box chars + special char ratio |
-| `Navigation` | Menu items | Short items in sequence |
-
-### Adding Site-Specific Parsers
-
-The `ContentParser` trait allows custom parsing for specific sites:
-
-```rust
-pub trait ContentParser {
-    fn can_parse(&self, url: &str) -> bool;
-    fn parse(&self, lines: &[&str]) -> Vec<ContentBlock>;
-}
-```
-
-See `src/render/text.rs` for the full API documentation.
-
-## Compatible Sites
-
-See [docs/SITES.md](docs/SITES.md) for a full list of tested websites and compatibility ratings.
-
-**Best results:**
-- News aggregators: Google News, Hacker News, NPR, Reuters
-- Tech blogs: Ars Technica, TechCrunch, DEV Community
-- Documentation: MDN Web Docs, Python Docs
-- Reference: Merriam-Webster, Wikipedia
-- Weather: wttr.in (ASCII art preserved)
-- Entertainment: IMDb, Rotten Tomatoes, Goodreads
-
-**Note:** Some sites (Product Hunt) use Cloudflare protection that blocks automated browsers. Sites like Twitter/X, LinkedIn, and Medium require login to access content (use `-v` flag).
-
-## Roadmap
-
-- [ ] Login workflow with session persistence
-- [x] Smart page loading with readyState check, content polling, and retry
-- [x] Link extraction and navigation (`-b` browse mode)
-- [ ] Site-specific extractors (Gmail, GitHub, etc.)
+---
 
 ## License
 
 MIT
 
-## Acknowledgments
+## Credits
 
-Built with:
-- [fantoccini](https://github.com/jonhoo/fantoccini) - WebDriver client for Rust
-- [tokio](https://tokio.rs/) - Async runtime
-- [clap](https://clap.rs/) - CLI argument parsing
-- [dialoguer](https://github.com/console-rs/dialoguer) - Interactive terminal prompts
+Built with [fantoccini](https://github.com/jonhoo/fantoccini), [scraper](https://github.com/rust-scraper/scraper), [dom-content-extraction](https://github.com/oiwn/dom-content-extraction), [tokio](https://tokio.rs/), [clap](https://clap.rs/).

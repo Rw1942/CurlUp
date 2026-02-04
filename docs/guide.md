@@ -1,752 +1,247 @@
-CurlUp Developer Guide (Headless Chrome Edition)
+# Developer Guide
 
-A terminal-first, text-only browser powered by real web rendering
+How to work on CurlUp.
 
-1. User Flow (Start to Finish)
+## Getting Started
 
-This section describes exactly what happens from the moment a user runs CurlUp to the moment they read content in the terminal.
+### 1. Clone and build
 
-1.1 First Run (No Existing Session)
+```bash
+git clone https://github.com/Rw1942/CurlUp.git
+cd CurlUp
+cargo build
+```
 
-User runs:
+### 2. Run in dev mode
 
-curlup https://mail.google.com
+```bash
+cargo run -- example.com
+cargo run -- -s news.ycombinator.com
+cargo run -- -m -v medium.com/@user/article
+```
 
+### 3. Run tests
 
-CurlUp:
+```bash
+cargo test
+cargo clippy
+```
 
-Detects no existing browser session
+### 4. Make changes
 
-Launches Chrome in headless or visible mode
+Edit code, then `cargo run` to test. The main files you'll touch:
 
-Uses a persistent user data directory (~/.curlup/chrome-profile)
+- `src/cli.rs` - Add CLI flags
+- `src/browse.rs` - Change interactive behavior
+- `src/dom/extract.rs` - Change how text is extracted
+- `src/dom/multilens/` - Add/modify extraction strategies
+- `src/render/text.rs` - Change terminal output formatting
 
-Chrome navigates to the URL.
+---
 
-User is prompted:
+## Architecture
 
-Please complete login in the browser window.
-Press ENTER when finished.
+CurlUp orchestrates Chrome - it doesn't render pages itself.
 
-
-User logs in normally (OAuth, 2FA, etc.).
-
-CurlUp does not handle credentials
-
-Chrome stores cookies/session state
-
-User presses ENTER.
-
-CurlUp:
-
-Scrolls a few view-heights to trigger lazy-loaded content
-
-Returns to the top before extraction
-
-Extracts the fully-rendered DOM
-
-Converts visible content to structured text
-
-Renders it to the terminal
-
-Keeps the link summary and prompt visible in a sticky bottom bar
-
-1.2 Subsequent Runs (Session Reuse)
-
-User runs:
-
-curlup https://mail.google.com
-
-
-CurlUp:
-
-Reuses the existing Chrome profile
-
-Session is already authenticated
-
-Page loads immediately
-
-DOM is extracted and rendered as text.
-
-No login required.
-
-1.3 Key Guarantees
-
-CurlUp never sees passwords
-
-CurlUp never reverse-engineers APIs
-
-CurlUp behaves like a real browser
-
-If Chrome can render it, CurlUp can read it
-
-2. High-Level Architecture
-
-CurlUp is a browser orchestrator + text renderer, not a browser implementation.
-
+```
 ┌─────────────┐
-│     CLI     │  (arguments, commands)
+│   CurlUp    │  CLI + orchestration (Rust)
 └──────┬──────┘
        │
 ┌──────▼──────┐
-│   Runtime   │  (tokio, lifecycle)
+│ ChromeDriver│  Spawned on port 9515
 └──────┬──────┘
        │
-┌──────▼─────────┐
-│ Browser Driver │  (WebDriver / Chrome)
-└──────┬─────────┘
+┌──────▼──────┐
+│   Chrome    │  Renders page (headless)
+└──────┬──────┘
        │
-┌──────▼─────────┐
-│ DOM Extractor  │  (JS executed in page)
-└──────┬─────────┘
+┌──────▼──────┐
+│  Extract    │  Pull text + links from DOM
+└──────┬──────┘
        │
-┌──────▼─────────┐
-│ Text Renderer  │  (terminal output)
-└────────────────┘
+┌──────▼──────┐
+│   Render    │  Format for terminal
+└─────────────┘
+```
 
+---
 
-Everything upstream of Chrome is Rust.
-Everything downstream of Chrome is text.
+## Project Structure
 
-3. Core Design Principle
+```
+src/
+├── main.rs              # Entry point, wires everything together
+├── cli.rs               # CLI argument parsing (clap)
+├── browse.rs            # Interactive browsing loop
+├── picker.rs            # Start screen with site menu
+├── term.rs              # Terminal utilities (clear, cursor, size)
+├── error.rs             # Error types
+│
+├── browser/
+│   ├── mod.rs           # Module exports
+│   ├── driver.rs        # Start/stop ChromeDriver process
+│   ├── chrome.rs        # Connect to Chrome, stealth settings
+│   └── navigation.rs    # Navigate to URL, wait for page ready
+│
+├── dom/
+│   ├── mod.rs           # Module exports
+│   ├── content.rs       # PageContent and Link types
+│   ├── extract.rs       # Standard extraction (innerText)
+│   └── multilens/       # Smart multi-strategy extraction
+│       ├── mod.rs       # Orchestrator, runs all strategies
+│       ├── snapshot.rs  # Get full HTML from browser
+│       ├── css.rs       # Extract via CSS selectors
+│       ├── traversal.rs # Walk DOM tree
+│       ├── density.rs   # Text-density algorithm (CETD)
+│       ├── semantic.rs  # ARIA landmarks
+│       ├── scorer.rs    # Rank results, pick best
+│       └── normalize.rs # Clean up extracted text
+│
+└── render/
+    ├── mod.rs           # Module exports
+    └── text.rs          # Terminal output formatting
+```
 
-Chrome owns correctness. Rust owns control.
+---
 
-Rust does:
+## Key Dependencies
 
-Lifecycle
+| Crate | What it does |
+|-------|--------------|
+| fantoccini | WebDriver client (controls Chrome) |
+| tokio | Async runtime |
+| scraper | HTML parsing for multilens mode |
+| dom-content-extraction | Text density algorithm |
+| clap | CLI argument parsing |
+| dialoguer | Interactive terminal prompts |
+| console | Terminal styling |
 
-Configuration
+---
 
-Data flow
+## How Extraction Works
 
-Error handling
+### Standard Mode (default)
 
-Chrome does:
+Runs JavaScript in Chrome:
+```javascript
+document.body.innerText  // Get all visible text
+document.querySelectorAll('a[href]')  // Get all links
+```
 
-JavaScript
+Fast and works on any site.
 
-DOM mutation
+### Multi-Lens Mode (`-m`)
 
-CSS resolution
+Gets full HTML, parses in Rust, runs 4 strategies:
 
-Auth
+```
+Chrome: document.documentElement.outerHTML
+                    │
+                    ▼
+         scraper::Html::parse_document()
+                    │
+    ┌───────┬───────┼───────┬───────┐
+    │       │       │       │       │
+   CSS    DOM    CETD    ARIA    (future)
+    │       │       │       │
+    └───────┴───────┴───────┘
+                    │
+                    ▼
+              Scorer picks best
+                    │
+                    ▼
+              Clean + normalize
+```
 
-Cookies
+Each strategy returns content + confidence score. Scorer picks the winner.
 
-Security
+---
 
-4. Crate Selection
-[dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-clap = { version = "4.5", features = ["derive"] }
-fantoccini = "0.19"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "1.0"
-anyhow = "1.0"
+## Common Tasks
 
-Why these crates
-Crate	Purpose
-fantoccini	WebDriver client
-tokio	Async orchestration
-clap	CLI parsing
-serde_json	JS ↔ Rust data exchange
-thiserror	Typed internal errors
-anyhow	Top-level ergonomics
-5. Directory Layout
-curlup/
-├── Cargo.toml
-└── src/
-    ├── main.rs
-    ├── cli.rs
-    ├── browser/
-    │   ├── mod.rs
-    │   ├── chrome.rs
-    │   └── navigation.rs
-    ├── dom/
-    │   ├── content.rs
-    │   └── extract.rs
-    ├── render/
-    │   └── text.rs
-    ├── term.rs
-    └── error.rs
+### Add a CLI flag
 
+1. Edit `src/cli.rs`:
+```rust
+#[arg(long, short = 'x')]
+pub my_flag: bool,
+```
 
-Each directory corresponds to a conceptual primitive, not a feature.
-
-6. CLI Primitive
-cli.rs
-use clap::Parser;
-
-#[derive(Parser)]
-pub struct Cli {
-    pub url: String,
-
-    #[arg(long)]
-    pub visible: bool,
+2. Use it in `src/main.rs` or `src/browse.rs`:
+```rust
+if args.my_flag {
+    // do something
 }
+```
 
+### Add a new extraction strategy
 
---visible launches Chrome non-headless (useful for login/debug)
-
-7. Browser Lifecycle (Chrome + WebDriver)
-7.1 Chrome Expectations
-
-CurlUp assumes:
-
-chromedriver is installed
-
-Compatible Chrome is available
-
-Chrome is launched outside Rust (simplest, most stable).
-
-7.2 Connecting via WebDriver
-browser/chrome.rs
-use fantoccini::Client;
-
-pub async fn connect() -> Result<Client, fantoccini::error::CmdError> {
-    Client::new("http://localhost:9515").await
-}
-
-
-Chrome should be launched like:
-
-chromedriver --port=9515 \
-  --user-data-dir=$HOME/.curlup/chrome-profile
-
-8. Page Loading and Readiness
-Navigate and wait for JS
-client.goto(url).await?;
-client.wait().for_element(fantoccini::Locator::Css("body")).await?;
-
-
-This ensures:
-
-JS executed
-
-DOM populated
-
-Page usable
-
-9. DOM Extraction (Critical Section)
-
-This is the most important abstraction in CurlUp.
-
-Principle
-
-DOM traversal happens inside the browser
-
-Rust receives clean, serialized data
-
-dom/extract.rs
-use serde::Deserialize;
-
-#[derive(Deserialize)]
-pub struct DomText {
-    pub blocks: Vec<String>,
-}
-
-pub async fn extract_text(client: &fantoccini::Client) -> anyhow::Result<Vec<String>> {
-    let script = r#"
-        (() => {
-            const elements = document.querySelectorAll(
-              'h1,h2,h3,p,li,article,section'
-            );
-
-            return {
-                blocks: Array.from(elements)
-                  .map(e => e.innerText.trim())
-                  .filter(t => t.length > 0)
-            };
-        })();
-    "#;
-
-    let result = client.execute(script, vec![]).await?;
-    let dom: DomText = serde_json::from_value(result)?;
-    Ok(dom.blocks)
-}
-
-Why this works
-
-Uses browser’s DOM APIs
-
-Respects JS mutations
-
-Ignores hidden content
-
-Zero HTML parsing in Rust
-
-10. Text Rendering
-render/text.rs
-pub fn render(lines: &[String]) {
-    for line in lines {
-        println!("{line}\n");
+1. Create `src/dom/multilens/mystrategy.rs`
+2. Make it return a `ContentResult`:
+```rust
+pub fn extract_my_way(doc: &Html) -> ContentResult {
+    ContentResult {
+        content: extracted_text,
+        source: "mystrategy".to_string(),
+        confidence: 0.7,  // 0.0 to 1.0
     }
 }
-
-
-No styling yet. That comes later.
-
-11. main.rs (System Wiring)
-use anyhow::Result;
-use clap::Parser;
-
-mod cli;
-mod browser;
-mod dom;
-mod render;
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = cli::Cli::parse();
-
-    let client = browser::chrome::connect().await?;
-    client.goto(&args.url).await?;
-
-    let text = dom::extract::extract_text(&client).await?;
-    render::text::render(&text);
-
-    Ok(())
-}
-
-
-This is intentionally boring.
-Boring code survives.
-
-12. Security Model (Brief, Explicit)
-
-All auth handled by Chrome
-
-CurlUp never inspects cookies
-
-Profile directory is user-owned
-
-No credential handling in Rust
-
-That’s it.
-
-13. What CurlUp Is (and Is Not)
-CurlUp IS
-
-A terminal reader for real web apps
-
-A browser orchestrator
-
-A JS-aware content extractor
-
-CurlUp IS NOT
-
-A browser engine
-
-A Gmail client
-
-A scraping framework
-
-14. Extension Points (Future)
-
-This architecture cleanly supports:
-
-Link navigation
-
-Keyboard interaction
-
-Scroll regions
-
-Site-specific extractors (Gmail, GitHub)
-
-TUI rendering (ratatui)
-
-Read-only automation
-
-All without rethinking fundamentals.
-
-15. Mental Model for Developers
-
-If you remember only one thing:
-
-Below is an **Appendix: Rust Language and Engineering Practices for CurlUp**.
-This is meant to be read *after* the main guide and focuses exclusively on **Rust-specific design decisions, idioms, and best practices** used in CurlUp. It explains *why* things are structured the way they are and how to extend them correctly.
-
----
-
-# Appendix A — Rust Language Guide for CurlUp
-
----
-
-## A.1 Rust’s Role in CurlUp
-
-Rust is **not** used to understand the web. Rust is used to:
-
-* Coordinate asynchronous systems
-* Enforce correctness at compile time
-* Make illegal states unrepresentable
-* Own lifecycle, errors, and data flow
-
-Chrome is the “oracle of truth.”
-Rust is the control plane.
-
-This framing is important: **Rust code should stay boring**.
-
----
-
-## A.2 Crate Boundaries and Module Design
-
-### Rule: One concept per module
-
-Each module in CurlUp corresponds to a *conceptual boundary*, not a feature.
-
-| Module    | Responsibility          |
-| --------- | ----------------------- |
-| `cli`     | User intent             |
-| `browser` | External system control |
-| `dom`     | Data extraction         |
-| `render`  | Output                  |
-| `error`   | Failure semantics       |
-
-If a module grows beyond ~300 lines, split it by *responsibility*, not type.
-
----
-
-## A.3 Ownership and Borrowing Strategy
-
-CurlUp deliberately avoids exposing lifetimes in public APIs.
-
-### Design rules
-
-* Own `String`, not `&str`, at boundaries
-* Borrow only inside functions
-* Clone small data freely (clarity > micro-optimizations)
-
-### Example: DOM extraction
-
+```
+3. Add to `src/dom/multilens/mod.rs`:
 ```rust
-pub async fn extract_text(client: &Client) -> Result<Vec<String>>
+mod mystrategy;
+// ...
+let my_result = mystrategy::extract_my_way(&doc);
+candidates.push(my_result);
 ```
 
-* `Client` is borrowed (long-lived)
-* Returned text is **owned**
-* Caller controls lifetime
+### Change terminal output
 
-This avoids:
-
-* Lifetime propagation
-* Tying data to browser lifetime
-* Accidental use-after-close bugs
+Edit `src/render/text.rs`. The main functions:
+- `render()` - Raw output
+- `render_condensed()` - Formatted output
+- `render_with_links_limited()` - Output with numbered links
 
 ---
 
-## A.4 Error Handling Philosophy
+## Error Handling
 
-### Internal: Typed errors
-
-### External: Erased errors
-
-This is intentional.
+- Use `Result<T, E>` everywhere
+- Internal errors: `thiserror` enums in `src/error.rs`
+- Top-level: `anyhow::Result` for easy error context
+- Never use `unwrap()` in production code paths
 
 ---
 
-### A.4.1 Internal Errors (`thiserror`)
-Use enums to model **distinct failure modes**.
+## Testing
 
-```rust
-#[derive(thiserror::Error, Debug)]
-pub enum BrowserError {
-    #[error("failed to connect to WebDriver")]
-    Connection,
-
-    #[error("navigation failed")]
-    Navigation,
-
-    #[error("DOM extraction failed")]
-    Dom,
-}
+```bash
+cargo test                      # Run unit tests
+cargo test multilens            # Run multilens tests only
+cargo run -- -s example.com     # Manual smoke test
 ```
 
-Typed errors answer the question:
+Most tests are in the multilens modules. They test extraction against sample HTML.
 
-> *What kind of failure occurred?*
-
----
-
-### A.4.2 Application Boundary (`anyhow`)
-
-At `main()`:
-
-```rust
-fn main() -> anyhow::Result<()> { ... }
-```
-
-This answers:
-
-> *Did the app succeed or fail?*
-
-Details still exist (via error chain), but **control flow stays simple**.
+Browser integration tests are hard because of timing. Manual testing is usually easier.
 
 ---
 
-### A.4.3 Never Use
+## Performance Notes
 
-* `unwrap()`
-* `expect()`
-* panics for control flow
+Don't worry about Rust performance. The bottlenecks are:
+1. Chrome startup (~1-2 seconds)
+2. Network requests
+3. JavaScript execution
 
-If something “cannot fail,” encode it in the type system.
-
----
-
-## A.5 Async Rust: Practical Guidelines
-
-CurlUp uses async **only** because:
-
-* WebDriver is networked
-* Chrome is slow
-* Blocking would degrade UX
-
-### Rules for Async in CurlUp
-
-1. **Async at I/O boundaries only**
-2. No async traits
-3. No boxed futures
-4. No manual `Pin`
-
-If async complexity appears, architecture is wrong.
+Rust code is negligible. Optimize for readability.
 
 ---
 
-### A.5.1 Tokio Runtime
-
-```rust
-#[tokio::main]
-async fn main()
-```
-
-* Multi-threaded runtime
-* Default scheduler
-* No custom executors
-
-This is the “don’t be clever” configuration.
-
----
-
-## A.6 Data Exchange: JavaScript ↔ Rust
-
-This is a critical seam.
-
-### Principle
-
-> JavaScript returns **plain JSON data**.
-> Rust deserializes into **strong types**.
-
----
-
-### Example
-
-JavaScript:
-
-```javascript
-return {
-  blocks: ["Inbox", "Unread mail", "Subject line"]
-};
-```
-
-Rust:
-
-```rust
-#[derive(Deserialize)]
-struct DomText {
-    blocks: Vec<String>,
-}
-```
-
-Benefits:
-
-* Schema validation
-* No string parsing
-* Compiler enforces correctness
-
-Never parse ad-hoc JS strings in Rust.
-
----
-
-## A.7 Trait Usage (Minimal, Strategic)
-
-Traits are used **only** to abstract system boundaries.
-
-### Example: Page Source
-
-```rust
-#[async_trait]
-pub trait PageSource {
-    async fn load(&self, url: &str) -> Result<Vec<String>>;
-}
-```
-
-Implementations:
-
-* `BrowserSource`
-* (Future) `StaticSource`
-
-Traits are **not** used for:
-
-* “Code reuse”
-* Polymorphism for its own sake
-* Modeling domain objects
-
-If there is only one implementation, do not introduce a trait.
-
----
-
-## A.8 Struct Design Rules
-
-### Prefer Plain Data
-
-```rust
-struct Page {
-    url: String,
-    blocks: Vec<String>,
-}
-```
-
-Avoid:
-
-* Smart pointers in structs
-* Interior mutability
-* Generic-heavy types
-
----
-
-### Immutability by Default
-
-Most structs should be immutable after creation.
-
-Mutation:
-
-* Happens in small scopes
-* Is obvious
-* Is localized
-
----
-
-## A.9 Logging and Diagnostics
-
-CurlUp should use **structured logging**, but sparingly.
-
-Recommended:
-
-* `tracing`
-* Log lifecycle events only
-
-Examples:
-
-* Browser started
-* Page loaded
-* DOM extracted
-* Rendering complete
-
-Avoid logging:
-
-* DOM content
-* Cookies
-* User data
-
----
-
-## A.10 Testing Strategy in Rust
-
-### Unit tests first
-
-Test:
-
-* DOM extraction JS snippets
-* Rust-side deserialization
-* Renderer formatting
-
-Avoid:
-
-* Browser-based tests initially
-* Flaky timing-dependent tests
-
----
-
-### Example Test
-
-```rust
-#[test]
-fn deserialize_dom_text() {
-    let json = r#"{ "blocks": ["Hello", "World"] }"#;
-    let parsed: DomText = serde_json::from_str(json).unwrap();
-    assert_eq!(parsed.blocks.len(), 2);
-}
-```
-
-Browser integration tests come later.
-
----
-
-## A.11 Performance Model (Don’t Overthink It)
-
-CurlUp performance is dominated by:
-
-* Chrome startup
-* Network latency
-* JS execution
-
-Rust-side performance is irrelevant by comparison.
-
-Therefore:
-
-* Favor clarity
-* Favor allocation
-* Favor copying
-
-Optimize only when Chrome is no longer the bottleneck (unlikely).
-
----
-
-## A.12 Unsafe Rust Policy
-
-**No `unsafe` is allowed** in CurlUp core.
-
-If unsafe becomes “necessary,” it means:
-
-* Wrong abstraction
-* Wrong crate
-* Wrong approach
-
----
-
-## A.13 Versioning and Stability
-
-Rust code should be:
-
-* Conservative
-* Explicit
-* Boring to read
-
-Breaking changes are acceptable early, but **interfaces should feel stable** even before they are.
-
----
-
-## A.14 How to Think While Writing CurlUp Rust Code
-
-Before writing any Rust code, ask:
-
-1. Does Chrome already do this better?
-2. Can this be expressed as data instead of logic?
-3. Can this be a pure function?
-4. Can this be owned instead of borrowed?
-5. Will this still make sense in 6 months?
-
-If the answer feels fuzzy, stop and simplify.
-
----
-
-## A.15 Final Guiding Principle
-
-> CurlUp succeeds not because it is clever,
-> but because it refuses to be.
-
-Rust enforces that discipline—if you let it.
-
----
+## Security
+
+- All auth happens in Chrome (we never see passwords)
+- No credential storage
+- Stealth mode hides automation but doesn't do anything sketchy
+- Profile directory is user-owned (`~/.curlup/` if used)

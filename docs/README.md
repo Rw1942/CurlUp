@@ -1,6 +1,5 @@
- # Documentation Index
- 
- - `guide.md` - Developer guide and architecture notes.
-- `architecture.md` - High-level system architecture and module boundaries.
- - `SITES.md` - Compatibility list and ratings for tested sites.
- - `progress.md` - Development progress and historical notes.
+# Docs
+
+- **[guide.md](guide.md)** - Developer guide: how the code works, how to extend it
+- **[architecture.md](architecture.md)** - High-level system design
+- **[progress.md](progress.md)** - Development history

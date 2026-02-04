@@ -17,5 +17,8 @@ which = "7.0"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 dialoguer = { version = "0.11", features = ["fuzzy-select"] }
 console = "0.15"
-readability = "0.3"
 url = "2.5"
+
+# Multi-lens content extraction
+scraper = "0.25"
+dom-content-extraction = "0.3"
