@@ -13,7 +13,7 @@ use std::io::{self, Write};
 use crate::browser;
 use crate::dom::extract::extract_page_content;
 use crate::dom::links::PageContent;
-use crate::render::text::render_with_links;
+use crate::render::text::render_with_links_limited;
 
 /// History entry for back navigation
 struct HistoryEntry {
@@ -39,6 +39,7 @@ pub async fn run_interactive(
         
         // Navigate to current URL
         browser::session::navigate_and_wait(client, &current_url).await?;
+        browser::session::scroll_to_top_after_load(client).await?;
         
         // Extract content with links
         let content = extract_page_content(client, &current_url).await?;
@@ -54,16 +55,12 @@ pub async fn run_interactive(
             return Ok(());
         }
         
-        render_with_links(&content);
-        
-        // Show quick tips on first page
-        if first_page {
-            print_first_time_tips();
-            first_page = false;
-        }
+        let height = terminal_height();
+        let content_height = content_area_height(height);
+        let _truncated = render_with_links_limited(&content, content_height);
         
         // Get user input
-        match prompt_for_action(&content, history.len())? {
+        match prompt_for_action(&content, history.len(), height, first_page)? {
             BrowseAction::FollowLink(num) => {
                 if let Some(link) = content.get_link(num) {
                     // Save current URL to history before navigating
@@ -123,6 +120,8 @@ pub async fn run_interactive(
                 print_error(&format!("Unknown command: '{}' - press 'h' for help", input));
             }
         }
+
+        first_page = false;
     }
 }
 
@@ -140,7 +139,12 @@ enum BrowseAction {
 }
 
 /// Prompt the user for an action
-fn prompt_for_action(content: &PageContent, history_depth: usize) -> Result<BrowseAction> {
+fn prompt_for_action(
+    content: &PageContent,
+    history_depth: usize,
+    terminal_height: usize,
+    show_tip: bool,
+) -> Result<BrowseAction> {
     // Build prompt with context
     let back_hint = if history_depth > 0 {
         format!(" {}:{}", style("b").dim(), style("back").dim())
@@ -157,13 +161,26 @@ fn prompt_for_action(content: &PageContent, history_depth: usize) -> Result<Brow
         String::new()
     };
     
-    print!(
-        "\n  {} {}{}{} ",
+    let summary = links_summary_line(content, show_tip);
+    let prompt = format!(
+        "  {} {}{}{} ",
         style("→").green().bold(),
         style("q:quit h:help").dim(),
         back_hint,
         link_hint,
     );
+
+    let width = terminal_width();
+    let summary_row = terminal_height.saturating_sub(1).max(1);
+    let prompt_row = terminal_height.max(1);
+
+    move_cursor(summary_row, 1);
+    clear_line();
+    print!("  {}", truncate_text(&summary, width.saturating_sub(2)));
+
+    move_cursor(prompt_row, 1);
+    clear_line();
+    print!("{}", prompt);
     io::stdout().flush()?;
     
     let mut input = String::new();
@@ -228,6 +245,14 @@ fn clear_screen() {
     let _ = io::stdout().flush();
 }
 
+fn move_cursor(row: usize, col: usize) {
+    print!("\x1b[{};{}H", row, col);
+}
+
+fn clear_line() {
+    print!("\x1b[2K");
+}
+
 /// Print page header with URL and navigation context
 fn print_header(url: &str, history_depth: usize) {
     let width = terminal_width();
@@ -251,15 +276,6 @@ fn print_header(url: &str, history_depth: usize) {
 }
 
 /// Print tips for first-time users
-fn print_first_time_tips() {
-    println!();
-    println!(
-        "  {} {}",
-        style("💡").dim(),
-        style("Tip: Enter a link number to navigate, or type a URL directly").dim()
-    );
-}
-
 /// Print help information
 fn print_help() {
     clear_screen();
@@ -363,6 +379,41 @@ fn terminal_width() -> usize {
         .and_then(|s| s.parse().ok())
         .unwrap_or(80)
         .min(100)
+}
+
+fn terminal_height() -> usize {
+    std::env::var("LINES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(24)
+        .max(10)
+        .min(80)
+}
+
+fn content_area_height(terminal_height: usize) -> usize {
+    let header_height = 5;
+    let bottom_bar_height = 2;
+    terminal_height.saturating_sub(header_height + bottom_bar_height).max(3)
+}
+
+fn links_summary_line(content: &PageContent, show_tip: bool) -> String {
+    let link_count = content.links.len();
+    let link_summary = if link_count == 0 {
+        "Links: none".to_string()
+    } else {
+        let shown = link_count.min(20);
+        if link_count > shown {
+            format!("Links: {} shown (1-{}), {} more", shown, shown, link_count - shown)
+        } else {
+            format!("Links: {} (1-{})", shown, shown)
+        }
+    };
+
+    if show_tip {
+        format!("{} | Tip: enter a link number or URL", link_summary)
+    } else {
+        link_summary
+    }
 }
 
 /// Truncate URL for display

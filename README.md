@@ -2,6 +2,8 @@
 
 A terminal web browser that lets you browse the web by clicking numbered links. CurlUp renders pages using Chrome, displays the text in your terminal, and lets you navigate by entering link numbers.
 
+Repository: https://github.com/Rw1942/CurlUp.git
+
 ## Why CurlUp?
 
 - **Browse the web from your terminal** - Navigate sites by typing link numbers
@@ -168,6 +170,8 @@ Once you pick a site, CurlUp shows the page content with clickable links:
 | `home` | Return to site picker |
 | `h` | Show help |
 | `q` | Quit |
+
+When a new page is loaded, CurlUp briefly scrolls to trigger lazy-loaded content and then returns to the top before rendering. The link summary and prompt stay visible in a sticky bottom bar so you always know what to do next.
 
 ### Examples
 

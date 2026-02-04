@@ -79,65 +79,91 @@ pub fn render_condensed(lines: &[String]) {
     }
 }
 
-/// Render page content with numbered links for interactive browsing.
+/// Render page content with links, limited to a maximum number of lines.
 ///
-/// Links are displayed in a clean, scannable format at the bottom of the page.
-pub fn render_with_links(content: &PageContent) {
+/// Returns true if output was truncated.
+pub fn render_with_links_limited(content: &PageContent, max_lines: usize) -> bool {
+    if max_lines == 0 {
+        return true;
+    }
+
     let width = terminal_width();
-    let formatted = format_for_terminal_with_url(Some(content.url.as_str()), &content.lines, width);
-    
-    for line in &formatted {
+    let lines = build_render_with_links_lines(content, width);
+
+    if lines.len() <= max_lines {
+        for line in lines {
+            println!("{}", line);
+        }
+        return false;
+    }
+
+    let visible_lines = max_lines.saturating_sub(1).max(1);
+    for line in lines.iter().take(visible_lines) {
         println!("{}", line);
     }
-    
+    println!("  ... more content below");
+    true
+}
+
+fn build_render_with_links_lines(content: &PageContent, width: usize) -> Vec<String> {
+    let formatted = format_for_terminal_with_url(Some(content.url.as_str()), &content.lines, width);
+    let mut lines = Vec::new();
+
+    for line in &formatted {
+        lines.push(line.to_string());
+    }
+
     // Show links section if there are any links
     if !content.links.is_empty() {
-        println!();
-        println!("{}", separator(width, '━'));
-        
+        lines.push(String::new());
+        lines.push(separator(width, '━'));
+
         let link_count = content.links.len().min(20);
-        println!(
+        lines.push(format!(
             "  \x1b[1;36m🔗 {} Links\x1b[0m \x1b[90m(enter a number to follow)\x1b[0m",
             link_count
-        );
-        println!();
-        
+        ));
+        lines.push(String::new());
+
         // Show links in a clean two-column style if width allows
         let max_links = 20.min(content.links.len());
-        
+
         for (i, link) in content.links.iter().take(max_links).enumerate() {
             let num = i + 1;
             let available_text_width = width.saturating_sub(8);
             let truncated_text = truncate_text(&link.text, available_text_width.min(60));
-            
+
             // Color code by link type
             let (color_start, color_end) = get_link_colors(&link.href);
-            
-            println!(
+
+            lines.push(format!(
                 "  {}\x1b[1m{:>2}\x1b[0m {}{}{}",
                 color_start,
                 num,
                 color_end,
                 truncated_text,
                 "\x1b[0m"
-            );
+            ));
         }
-        
+
         if content.links.len() > max_links {
-            println!(
-                "\n  \x1b[90m+ {} more links on this page\x1b[0m",
+            lines.push(String::new());
+            lines.push(format!(
+                "  \x1b[90m+ {} more links on this page\x1b[0m",
                 content.links.len() - max_links
-            );
+            ));
         }
-        
-        println!();
-        println!("{}", separator(width, '━'));
+
+        lines.push(String::new());
+        lines.push(separator(width, '━'));
     } else {
-        println!();
-        println!("{}", separator(width, '─'));
-        println!("  \x1b[90mNo clickable links found on this page\x1b[0m");
-        println!("{}", separator(width, '─'));
+        lines.push(String::new());
+        lines.push(separator(width, '─'));
+        lines.push("  \x1b[90mNo clickable links found on this page\x1b[0m".to_string());
+        lines.push(separator(width, '─'));
     }
+
+    lines
 }
 
 /// Get ANSI color codes based on link URL type
@@ -1278,10 +1304,6 @@ fn is_number(s: &str) -> bool {
 // ============================================================================
 
 /// Main entry point for formatting text for terminal output.
-fn format_for_terminal(lines: &[String], width: usize) -> Vec<String> {
-    format_for_terminal_with_url(None, lines, width)
-}
-
 /// Formatting entry point that allows URL-aware parsing.
 fn format_for_terminal_with_url(url: Option<&str>, lines: &[String], width: usize) -> Vec<String> {
     let parsed = parse_content_with_context(url, lines);

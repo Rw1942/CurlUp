@@ -175,22 +175,8 @@ fn normalize_url(url: &str) -> String {
 
 /// Print the welcome banner
 fn print_welcome_banner() {
-    let banner = r#"
-    ╭─────────────────────────────────────────╮
-    │                                         │
-    │      ██████╗██╗   ██╗██████╗ ██╗        │
-    │     ██╔════╝██║   ██║██╔══██╗██║        │
-    │     ██║     ██║   ██║██████╔╝██║        │
-    │     ██║     ██║   ██║██╔══██╗██║        │
-    │     ╚██████╗╚██████╔╝██║  ██║███████╗   │
-    │      ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝   │
-    │                                         │
-    │       Terminal Web Browser v0.1         │
-    │                                         │
-    ╰─────────────────────────────────────────╯
-"#;
-    
-    println!("{}", style(banner).cyan());
+    let banner = include_str!("assets/banner.txt");
+    println!("{}", style(format!("\n{banner}")).cyan());
 }
 
 /// Print loading message

@@ -13,3 +13,4 @@ alwaysApply: true
 - Update `README.md` and `guide.md` for user-facing CLI changes or behavior tweaks.
 - Do not check in generated artifacts (`target/`, `release/`) or OS metadata files.
 - When adding CLI flags, update `README.md` usage and examples.
+- GitHub repo: https://github.com/Rw1942/CurlUp.git

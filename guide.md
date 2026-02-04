@@ -39,11 +39,17 @@ User presses ENTER.
 
 CurlUp:
 
+Scrolls a few view-heights to trigger lazy-loaded content
+
+Returns to the top before extraction
+
 Extracts the fully-rendered DOM
 
 Converts visible content to structured text
 
 Renders it to the terminal
+
+Keeps the link summary and prompt visible in a sticky bottom bar
 
 1.2 Subsequent Runs (Session Reuse)
 
