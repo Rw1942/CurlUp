@@ -1,10 +1,12 @@
 //! DOM content extraction from rendered pages.
 //!
 //! Extraction is done in a single WebDriver call that retrieves:
-//! - All visible text via innerText
+//! - Text from block-level HTML elements (paragraphs, headings, list items)
 //! - All meaningful links from the page
 //!
-//! The text is then cleaned to remove boilerplate and junk lines.
+//! By extracting from individual elements using textContent (not innerText),
+//! we get raw text without CSS-imposed line breaks, enabling proper rewrapping
+//! to any terminal width.
 
 use anyhow::Result;
 use fantoccini::Client;
@@ -15,9 +17,9 @@ use super::content::{Link, PageContent};
 /// Raw extraction result from the consolidated JavaScript call.
 #[derive(Debug, Deserialize, Default)]
 struct ExtractResult {
-    /// All visible text from document.body.innerText
+    /// Text paragraphs extracted from block-level elements
     #[serde(default)]
-    text: String,
+    paragraphs: Vec<String>,
     /// Extracted links
     #[serde(default)]
     links: Vec<RawLink>,
@@ -31,18 +33,43 @@ struct RawLink {
     href: Option<String>,
 }
 
-/// JavaScript that extracts text and links in one call.
+/// JavaScript that extracts text from block elements and links in one call.
 /// 
-/// This consolidates what was previously 2-3 separate WebDriver calls
-/// into a single round-trip for better performance.
+/// Uses textContent instead of innerText to get raw text without CSS line breaks.
+/// This enables proper rewrapping to terminal width.
 const EXTRACT_JS: &str = r#"
 return (function() {
-    var result = { text: '', links: [] };
+    var result = { paragraphs: [], links: [] };
     
-    // Get all visible text
-    if (document.body) {
-        result.text = document.body.innerText || '';
-    }
+    // Block-level elements that contain content
+    var blockSelectors = 'p, h1, h2, h3, h4, h5, h6, li, blockquote, figcaption, pre, td, th, dt, dd';
+    
+    // Elements to skip (navigation, headers, footers, etc.)
+    var skipSelectors = 'nav, header, footer, aside, [role="navigation"], [role="banner"], [role="contentinfo"], [aria-hidden="true"]';
+    
+    // Extract text from each block element
+    document.querySelectorAll(blockSelectors).forEach(function(el) {
+        // Skip if inside navigation/header/footer/aside
+        if (el.closest(skipSelectors)) return;
+        
+        // Skip hidden elements
+        var style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') return;
+        
+        // Get raw textContent (no CSS line breaks)
+        var text = (el.textContent || '').trim();
+        
+        // Skip very short or empty text
+        if (text.length < 3) return;
+        
+        // Add paragraph with tag hint for headings
+        var tag = el.tagName.toLowerCase();
+        if (tag.match(/^h[1-6]$/)) {
+            result.paragraphs.push('__heading__' + text);
+        } else {
+            result.paragraphs.push(text);
+        }
+    });
     
     // Extract meaningful links
     var seen = {};
@@ -62,8 +89,7 @@ return (function() {
         if (seen[href]) return;
         
         // Skip if inside nav/header/footer
-        var parent = a.closest('nav, header, footer, [role="navigation"]');
-        if (parent) return;
+        if (a.closest(skipSelectors)) return;
         
         seen[href] = true;
         result.links.push({ text: text, href: href });
@@ -79,8 +105,8 @@ pub async fn extract_page_content(client: &Client, current_url: &str) -> Result<
     let result = client.execute(EXTRACT_JS, vec![]).await?;
     let extracted: ExtractResult = serde_json::from_value(result).unwrap_or_default();
 
-    // Process text into clean lines
-    let lines = clean_text(&extracted.text);
+    // Process paragraphs into clean lines
+    let lines = clean_paragraphs(&extracted.paragraphs);
 
     // Convert raw links to typed Links
     let links = extracted
@@ -101,15 +127,52 @@ pub async fn extract_page_content(client: &Client, current_url: &str) -> Result<
 // Text Cleanup
 // ============================================================================
 
-/// Parse and clean text content into lines.
-fn clean_text(text: &str) -> Vec<String> {
-    text.lines()
-        .map(|s| s.trim().to_string())
-        .filter(|line| {
-            let trimmed = line.trim();
-            !trimmed.is_empty() && trimmed.len() >= 2 && !is_junk_line(trimmed)
-        })
-        .collect()
+/// Clean and normalize extracted paragraphs.
+/// 
+/// Each paragraph is a separate block element from the page.
+/// We normalize whitespace and filter junk, preserving paragraph boundaries.
+fn clean_paragraphs(paragraphs: &[String]) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut prev_text = String::new();
+    
+    for para in paragraphs {
+        // Check if this is a heading (marked by JS extraction)
+        let is_heading = para.starts_with("__heading__");
+        let text = if is_heading {
+            para.strip_prefix("__heading__").unwrap_or(para)
+        } else {
+            para.as_str()
+        };
+        
+        // Normalize whitespace (collapse multiple spaces/newlines to single space)
+        let normalized = normalize_whitespace(text);
+        
+        // Skip empty, too short, or junk lines
+        if normalized.is_empty() || normalized.len() < 3 || is_junk_line(&normalized) {
+            continue;
+        }
+        
+        // Skip exact duplicates of previous paragraph
+        if normalized == prev_text {
+            continue;
+        }
+        
+        // Add blank line before headings for visual separation
+        if is_heading && !result.is_empty() {
+            result.push(String::new());
+        }
+        
+        prev_text = normalized.clone();
+        result.push(normalized);
+    }
+    
+    result
+}
+
+/// Normalize whitespace within text.
+/// Collapses multiple spaces, tabs, and newlines into single spaces.
+fn normalize_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Check if a line is likely junk (boilerplate, not real content).

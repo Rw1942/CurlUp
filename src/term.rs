@@ -8,11 +8,13 @@ pub fn clear_screen() {
 }
 
 /// Move cursor to a 1-based row/column.
+#[allow(dead_code)]
 pub fn move_cursor(row: usize, col: usize) {
     print!("\x1b[{};{}H", row, col);
 }
 
 /// Clear the current line.
+#[allow(dead_code)]
 pub fn clear_line() {
     print!("\x1b[2K");
 }
@@ -24,12 +26,14 @@ pub fn terminal_width() -> usize {
 }
 
 /// Get terminal height by querying the terminal directly.
+#[allow(dead_code)]
 pub fn terminal_height() -> usize {
     let (rows, _) = Term::stdout().size();
     (rows as usize).max(10)
 }
 
 /// Compute usable content height for scrolling output.
+#[allow(dead_code)]
 pub fn content_area_height(terminal_height: usize) -> usize {
     let header_height = 5;
     let bottom_bar_height = 2;
