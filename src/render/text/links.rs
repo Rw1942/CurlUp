@@ -5,7 +5,9 @@ use super::format_for_terminal_with_url;
 
 const SUPERSCRIPTS: [char; 10] = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
 
-pub(super) fn build_render_with_links_lines(content: &PageContent, width: usize) -> Vec<String> {
+/// Build formatted lines with link annotations for display.
+/// Returns vector of strings ready for printing.
+pub fn build_render_with_links_lines(content: &PageContent, width: usize) -> Vec<String> {
     let formatted = format_for_terminal_with_url(Some(content.url.as_str()), &content.lines, width);
     annotate_links(&formatted, &content.links)
 }

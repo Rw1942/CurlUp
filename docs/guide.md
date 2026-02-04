@@ -201,7 +201,15 @@ candidates.push(my_result);
 Edit `src/render/text.rs`. The main functions:
 - `render()` - Raw output
 - `render_condensed()` - Formatted output
-- `render_with_links_limited()` - Output with numbered links
+- `build_render_lines()` - Build lines for scrollable display
+
+### Change browsing behavior
+
+Edit `src/browse.rs`. This handles:
+- Content scrolling (j/k/Enter)
+- Link following (1-20)
+- Navigation (back, refresh, URLs)
+- The prompt and status line
 
 ---
 

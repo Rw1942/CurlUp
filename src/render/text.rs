@@ -14,8 +14,15 @@ mod links;
 mod util;
 
 use crate::dom::content::PageContent;
-use self::links::build_render_with_links_lines;
+pub use self::links::build_render_with_links_lines;
 use self::util::{clean_blank_lines, is_preformatted, terminal_width, wrap_text};
+
+/// Build formatted lines with link annotations without printing.
+/// Use this when you need to handle display yourself (e.g., scrolling).
+pub fn build_render_lines(content: &PageContent) -> Vec<String> {
+    let width = terminal_width();
+    build_render_with_links_lines(content, width)
+}
 
 // ============================================================================
 // PUBLIC API
@@ -54,6 +61,7 @@ pub fn render_condensed(lines: &[String]) {
 /// Render page content with links, limited to a maximum number of lines.
 ///
 /// Returns true if output was truncated.
+#[allow(dead_code)]
 pub fn render_with_links_limited(content: &PageContent, max_lines: usize) -> bool {
     if max_lines == 0 {
         return true;

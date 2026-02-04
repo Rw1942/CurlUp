@@ -4,6 +4,7 @@
 //! - Display page content with numbered links
 //! - Enter a number to follow that link
 //! - Keyboard shortcuts for navigation
+//! - Scrolling through long content
 //! - Visual feedback and helpful prompts
 
 use anyhow::Result;
@@ -14,7 +15,7 @@ use crate::browser;
 use crate::dom::content::PageContent;
 use crate::dom::extract::extract_page_content;
 use crate::dom::multilens::extract_multilens;
-use crate::render::text::render_with_links_limited;
+use crate::render::text::build_render_lines;
 use crate::term::{clear_line, clear_screen, content_area_height, move_cursor, terminal_height, terminal_width};
 
 /// History entry for back navigation
@@ -51,18 +52,40 @@ pub async fn run_interactive_with_options(
     let mut history: Vec<HistoryEntry> = Vec::new();
     let mut current_url = initial_url.to_string();
     let mut first_page = true;
+    let mut scroll_offset: usize = 0;
+    let mut cached_lines: Vec<String> = Vec::new();
     
     loop {
-        // Show loading indicator
-        if !first_page {
-            print_loading_inline();
+        let height = terminal_height();
+        let content_height = content_area_height(height);
+        
+        // Check if we need to fetch new content (not just scrolling)
+        let need_fetch = cached_lines.is_empty();
+        
+        if need_fetch {
+            // Show loading indicator
+            if !first_page {
+                print_loading_inline();
+            }
+            
+            // Navigate to current URL with stealth mode
+            browser::navigation::navigate_and_wait_with_stealth(client, &current_url, stealth).await?;
+            browser::navigation::scroll_to_top_after_load(client).await?;
+            
+            // Extract content with links (use multilens if enabled)
+            let content = if multilens {
+                extract_multilens(client, &current_url).await?
+            } else {
+                extract_page_content(client, &current_url).await?
+            };
+            
+            // Build lines for display
+            cached_lines = build_render_lines(&content);
+            scroll_offset = 0;
         }
         
-        // Navigate to current URL with stealth mode
-        browser::navigation::navigate_and_wait_with_stealth(client, &current_url, stealth).await?;
-        browser::navigation::scroll_to_top_after_load(client).await?;
-        
-        // Extract content with links (use multilens if enabled)
+        // Extract content again for link handling (needed for link clicks)
+        // TODO: Cache the PageContent too for better performance
         let content = if multilens {
             extract_multilens(client, &current_url).await?
         } else {
@@ -73,12 +96,20 @@ pub async fn run_interactive_with_options(
         clear_screen();
         print_header(&current_url, history.len());
         
-        let height = terminal_height();
-        let content_height = content_area_height(height);
-        let _truncated = render_with_links_limited(&content, content_height);
+        // Display content with scrolling
+        let total_lines = cached_lines.len();
+        let visible_end = (scroll_offset + content_height).min(total_lines);
+        
+        for line in cached_lines.iter().skip(scroll_offset).take(content_height) {
+            println!("{}", line);
+        }
+        
+        // Show scroll indicator if there's more content
+        let has_more_above = scroll_offset > 0;
+        let has_more_below = visible_end < total_lines;
         
         // Get user input
-        match prompt_for_action(&content, history.len(), height, first_page)? {
+        match prompt_for_action_with_scroll(&content, history.len(), height, first_page, has_more_above, has_more_below, scroll_offset, total_lines)? {
             BrowseAction::FollowLink(num) => {
                 if let Some(link) = content.get_link(num) {
                     // Save current URL to history before navigating
@@ -87,6 +118,7 @@ pub async fn run_interactive_with_options(
                         title: get_page_title(&content),
                     });
                     current_url = link.href.clone();
+                    cached_lines.clear(); // Clear cache to fetch new page
                     println!(
                         "\n  > Following link to {}",
                         style(truncate_text(&link.text, 40)).white()
@@ -102,12 +134,30 @@ pub async fn run_interactive_with_options(
                         style(truncate_text(&entry.title, 40)).white()
                     );
                     current_url = entry.url;
+                    cached_lines.clear(); // Clear cache to fetch new page
                 } else {
                     print_warning("You're at the first page - nowhere to go back");
                 }
             }
             BrowseAction::Refresh => {
                 println!("\n  Refreshing...");
+                cached_lines.clear(); // Clear cache to refetch
+            }
+            BrowseAction::ScrollDown => {
+                let scroll_amount = content_height.saturating_sub(2).max(1);
+                if scroll_offset + content_height < total_lines {
+                    scroll_offset = (scroll_offset + scroll_amount).min(total_lines.saturating_sub(content_height));
+                }
+            }
+            BrowseAction::ScrollUp => {
+                let scroll_amount = content_height.saturating_sub(2).max(1);
+                scroll_offset = scroll_offset.saturating_sub(scroll_amount);
+            }
+            BrowseAction::ScrollTop => {
+                scroll_offset = 0;
+            }
+            BrowseAction::ScrollBottom => {
+                scroll_offset = total_lines.saturating_sub(content_height);
             }
             BrowseAction::Quit => {
                 print_goodbye();
@@ -127,6 +177,7 @@ pub async fn run_interactive_with_options(
                     title: get_page_title(&content),
                 });
                 current_url = url;
+                cached_lines.clear(); // Clear cache to fetch new page
             }
             BrowseAction::Home => {
                 // Go back to start screen
@@ -151,15 +202,23 @@ enum BrowseAction {
     ShowUrl,
     GoToUrl(String),
     Home,
+    ScrollDown,
+    ScrollUp,
+    ScrollTop,
+    ScrollBottom,
     Invalid(String),
 }
 
-/// Prompt the user for an action
-fn prompt_for_action(
+/// Prompt the user for an action with scroll support
+fn prompt_for_action_with_scroll(
     content: &PageContent,
     history_depth: usize,
     terminal_height: usize,
     show_tip: bool,
+    has_more_above: bool,
+    has_more_below: bool,
+    scroll_offset: usize,
+    total_lines: usize,
 ) -> Result<BrowseAction> {
     // Build prompt with context
     let back_hint = if history_depth > 0 {
@@ -177,12 +236,20 @@ fn prompt_for_action(
         String::new()
     };
     
-    let summary = links_summary_line(content, show_tip);
+    // Scroll hint
+    let scroll_hint = if has_more_above || has_more_below {
+        format!(" {}", style("j/k:scroll").dim())
+    } else {
+        String::new()
+    };
+    
+    let summary = scroll_summary_line(content, show_tip, has_more_above, has_more_below, scroll_offset, total_lines);
     let prompt = format!(
-        "  > {}{}{} ",
+        "  > {}{}{}{} ",
         style("q:quit h:help").dim(),
         back_hint,
         link_hint,
+        scroll_hint,
     );
 
     let width = terminal_width();
@@ -203,6 +270,10 @@ fn prompt_for_action(
     let input = input.trim();
     
     if input.is_empty() {
+        // Enter scrolls down if there's more content, otherwise refreshes
+        if has_more_below {
+            return Ok(BrowseAction::ScrollDown);
+        }
         return Ok(BrowseAction::Refresh);
     }
     
@@ -215,6 +286,11 @@ fn prompt_for_action(
         "h" | "help" | "?" => Ok(BrowseAction::Help),
         "u" | "url" => Ok(BrowseAction::ShowUrl),
         "home" | "start" => Ok(BrowseAction::Home),
+        // Scroll commands
+        "j" | "down" | "d" | "n" | "m" | "more" | " " => Ok(BrowseAction::ScrollDown),
+        "k" | "up" | "p" => Ok(BrowseAction::ScrollUp),
+        "gg" | "top" | "t" => Ok(BrowseAction::ScrollTop),
+        "g" => Ok(BrowseAction::ScrollBottom), // 'G' in vim goes to bottom
         _ => {
             // Check if it's a URL
             if input.contains('.') && !input.contains(' ') {
@@ -288,12 +364,19 @@ fn print_help() {
   │                                                     │
   ├─────────────────────────────────────────────────────┤
   │                                                     │
+  │   SCROLLING                                         │
+  │   ─────────                                         │
+  │   j, n, m    Scroll down (page down)                │
+  │   k, p       Scroll up (page up)                    │
+  │   [Enter]    Scroll down (or refresh if at bottom)  │
+  │   gg, t      Jump to top of page                    │
+  │   g          Jump to bottom of page                 │
+  │                                                     │
   │   NAVIGATION                                        │
   │   ───────────                                       │
   │   [1-20]     Follow a numbered link                 │
   │   b, back    Go back to previous page               │
   │   r          Refresh current page                   │
-  │   [Enter]    Refresh current page                   │
   │                                                     │
   │   QUICK ACTIONS                                     │
   │   ─────────────                                     │
@@ -362,6 +445,7 @@ fn get_page_title(content: &PageContent) -> String {
         .unwrap_or_else(|| "Unknown".to_string())
 }
 
+#[allow(dead_code)]
 fn links_summary_line(content: &PageContent, show_tip: bool) -> String {
     let link_count = content.links.len();
     let link_summary = if link_count == 0 {
@@ -379,6 +463,53 @@ fn links_summary_line(content: &PageContent, show_tip: bool) -> String {
         format!("{} | Tip: type a number to follow", link_summary)
     } else {
         link_summary
+    }
+}
+
+fn scroll_summary_line(
+    content: &PageContent,
+    show_tip: bool,
+    has_more_above: bool,
+    has_more_below: bool,
+    scroll_offset: usize,
+    total_lines: usize,
+) -> String {
+    let link_count = content.links.len();
+    let link_summary = if link_count == 0 {
+        "No links".to_string()
+    } else {
+        let shown = link_count.min(20);
+        if link_count > shown {
+            format!("{} of {} links (1-{})", shown, link_count, shown)
+        } else {
+            format!("{} links (1-{})", link_count, link_count)
+        }
+    };
+
+    // Build scroll indicator
+    let scroll_indicator = if has_more_above || has_more_below {
+        let arrows = match (has_more_above, has_more_below) {
+            (true, true) => "↑↓",
+            (true, false) => "↑",
+            (false, true) => "↓",
+            (false, false) => "",
+        };
+        let percent = if total_lines > 0 {
+            ((scroll_offset as f64 / total_lines as f64) * 100.0).min(100.0) as usize
+        } else {
+            0
+        };
+        format!(" {} {}%", arrows, percent)
+    } else {
+        String::new()
+    };
+
+    if show_tip && has_more_below {
+        format!("{}{}  | Tip: press Enter or 'j' to scroll", link_summary, scroll_indicator)
+    } else if show_tip {
+        format!("{}{} | Tip: type a number to follow", link_summary, scroll_indicator)
+    } else {
+        format!("{}{}", link_summary, scroll_indicator)
     }
 }
 

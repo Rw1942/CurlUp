@@ -83,6 +83,10 @@ curlup -v mail.google.com       # Visible browser (for login)
 | Key | What it does |
 |-----|--------------|
 | `1-20` | Follow that link |
+| `j` or `Enter` | Scroll down |
+| `k` | Scroll up |
+| `gg` or `t` | Jump to top |
+| `g` | Jump to bottom |
 | `b` | Go back |
 | `r` | Refresh |
 | `u` | Show current URL |
