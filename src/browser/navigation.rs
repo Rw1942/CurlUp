@@ -4,8 +4,9 @@
 //! - Stealth mode to avoid bot detection
 //! - Smart wait for content stability (replaces fixed delays)
 //! - Scroll handling for lazy-loaded content
+//! - User-friendly error messages for common failures
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use fantoccini::Client;
 use std::time::Duration;
 
@@ -102,7 +103,8 @@ pub async fn navigate_and_wait(client: &Client, url: &str) -> Result<()> {
 /// 3. Wait for document.readyState === 'complete'
 /// 4. Wait for content to stabilize (no more changes to innerText)
 pub async fn navigate_and_wait_with_stealth(client: &Client, url: &str, stealth: bool) -> Result<()> {
-    client.goto(url).await?;
+    client.goto(url).await
+        .map_err(|e| enhance_navigation_error(url, e))?;
 
     // Inject stealth JavaScript immediately after navigation
     if stealth {
@@ -154,4 +156,107 @@ pub async fn scroll_to_top_after_load(client: &Client) -> Result<()> {
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     Ok(())
+}
+
+/// Convert raw WebDriver/Chrome errors into user-friendly messages.
+fn enhance_navigation_error(url: &str, err: fantoccini::error::CmdError) -> anyhow::Error {
+    let msg = err.to_string();
+    let domain = extract_domain(url);
+    
+    // DNS resolution failed
+    if msg.contains("ERR_NAME_NOT_RESOLVED") {
+        return anyhow!(
+            "Could not find '{domain}'\n\n  \
+            The domain doesn't exist or DNS lookup failed.\n\n  \
+            Check:\n  \
+            - URL spelling\n  \
+            - Internet connection\n  \
+            - DNS settings"
+        );
+    }
+    
+    // Connection refused (server not running or blocking)
+    if msg.contains("ERR_CONNECTION_REFUSED") {
+        return anyhow!(
+            "Connection refused by '{domain}'\n\n  \
+            The server exists but isn't accepting connections.\n\n  \
+            This could mean:\n  \
+            - Server is down\n  \
+            - Wrong port\n  \
+            - Firewall blocking"
+        );
+    }
+    
+    // Connection timeout
+    if msg.contains("ERR_CONNECTION_TIMED_OUT") || msg.contains("ERR_TIMED_OUT") {
+        return anyhow!(
+            "Connection to '{domain}' timed out\n\n  \
+            The server took too long to respond.\n\n  \
+            Try:\n  \
+            - Check if the site is down (try in a regular browser)\n  \
+            - Check your internet connection\n  \
+            - Try again later"
+        );
+    }
+    
+    // No internet
+    if msg.contains("ERR_INTERNET_DISCONNECTED") || msg.contains("ERR_NETWORK_CHANGED") {
+        return anyhow!(
+            "No internet connection\n\n  \
+            Check your network connection and try again."
+        );
+    }
+    
+    // SSL/TLS certificate errors
+    if msg.contains("ERR_CERT") || msg.contains("ERR_SSL") || msg.contains("InsecureCertificate") {
+        return anyhow!(
+            "SSL certificate error for '{domain}'\n\n  \
+            The site's security certificate is invalid or expired.\n\n  \
+            This could mean:\n  \
+            - The site's certificate expired\n  \
+            - Your system clock is wrong\n  \
+            - Potential security risk"
+        );
+    }
+    
+    // Blocked by client/firewall
+    if msg.contains("ERR_BLOCKED") {
+        return anyhow!(
+            "Access to '{domain}' was blocked\n\n  \
+            The request was blocked by your browser, firewall, or security software."
+        );
+    }
+    
+    // Too many redirects
+    if msg.contains("ERR_TOO_MANY_REDIRECTS") {
+        return anyhow!(
+            "Too many redirects for '{domain}'\n\n  \
+            The site is caught in a redirect loop.\n\n  \
+            Try:\n  \
+            - Clear cookies for this site\n  \
+            - Try the URL in a regular browser"
+        );
+    }
+    
+    // Empty response
+    if msg.contains("ERR_EMPTY_RESPONSE") {
+        return anyhow!(
+            "Empty response from '{domain}'\n\n  \
+            The server connected but sent no data.\n\n  \
+            The server might be misconfigured or overloaded."
+        );
+    }
+    
+    // Fallback: return original error with context
+    anyhow!("Failed to load '{domain}': {msg}")
+}
+
+/// Extract domain from URL for error messages.
+fn extract_domain(url: &str) -> String {
+    url.trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or(url)
+        .to_string()
 }

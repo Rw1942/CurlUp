@@ -34,7 +34,7 @@ pub async fn extract_multilens(client: &Client, url: &str, focus: bool) -> Resul
     // Extract and filter links
     let links = extract_links(&doc, url);
 
-    Ok(PageContent::new(url.to_string(), html, links))
+    Ok(PageContent::new(html, links))
 }
 
 /// Extract links from a parsed HTML document.
@@ -86,7 +86,6 @@ fn extract_links(doc: &Html, base_url: &str) -> Vec<Link> {
         let resolved_href = resolve_url(&href, base_url);
 
         links.push(Link {
-            text,
             href: resolved_href,
         });
     }

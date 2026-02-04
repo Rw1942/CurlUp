@@ -123,7 +123,6 @@ fn extract_article_links(html: &str, base_url: &str) -> Vec<Link> {
             }
             
             Some(Link {
-                text,
                 href: href.to_string(),
             })
         })

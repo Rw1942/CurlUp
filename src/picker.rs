@@ -19,18 +19,35 @@ struct Site {
     category: &'static str,
 }
 
-/// Curated list of well-tested sites
+/// Curated list of well-tested sites for developers and tech enthusiasts
 const SITES: &[Site] = &[
-    Site { name: "Hacker News", url: "https://news.ycombinator.com", category: "Tech" },
-    Site { name: "Google News", url: "https://news.google.com", category: "News" },
+    // News & Aggregators
+    Site { name: "Hacker News", url: "https://news.ycombinator.com", category: "News" },
+    Site { name: "Lobsters", url: "https://lobste.rs", category: "News" },
+    Site { name: "Product Hunt", url: "https://www.producthunt.com", category: "News" },
+    Site { name: "Ars Technica", url: "https://arstechnica.com", category: "News" },
+    // Developer Platforms
     Site { name: "GitHub Trending", url: "https://github.com/trending", category: "Dev" },
+    Site { name: "GitLab Explore", url: "https://gitlab.com/explore", category: "Dev" },
+    Site { name: "Stack Overflow", url: "https://stackoverflow.com", category: "Dev" },
+    Site { name: "DEV Community", url: "https://dev.to", category: "Dev" },
+    // Communities
     Site { name: "Reddit Programming", url: "https://www.reddit.com/r/programming", category: "Community" },
-    Site { name: "DEV Community", url: "https://dev.to", category: "Tech" },
-    Site { name: "NPR News", url: "https://www.npr.org", category: "News" },
-    Site { name: "Wikipedia", url: "https://en.wikipedia.org", category: "Reference" },
-    Site { name: "Weather", url: "https://wttr.in", category: "Weather" },
-    Site { name: "IMDb Top Movies", url: "https://www.imdb.com/chart/top", category: "Movies" },
-    Site { name: "Reuters", url: "https://www.reuters.com", category: "News" },
+    Site { name: "Reddit LocalLLaMA", url: "https://www.reddit.com/r/LocalLLaMA", category: "Community" },
+    Site { name: "Reddit Rust", url: "https://www.reddit.com/r/rust", category: "Community" },
+    // Documentation & Reference
+    Site { name: "MDN Web Docs", url: "https://developer.mozilla.org", category: "Docs" },
+    Site { name: "Can I Use", url: "https://caniuse.com", category: "Reference" },
+    Site { name: "Rust Docs", url: "https://doc.rust-lang.org/book", category: "Docs" },
+    // Package Registries
+    Site { name: "npm Registry", url: "https://www.npmjs.com", category: "Packages" },
+    Site { name: "crates.io", url: "https://crates.io", category: "Packages" },
+    Site { name: "PyPI", url: "https://pypi.org", category: "Packages" },
+    // AI/ML
+    Site { name: "Hugging Face", url: "https://huggingface.co", category: "AI/ML" },
+    Site { name: "Papers With Code", url: "https://paperswithcode.com", category: "AI/ML" },
+    // Web Dev
+    Site { name: "Smashing Magazine", url: "https://www.smashingmagazine.com", category: "Web" },
 ];
 
 /// Show the welcome screen and return the selected URL

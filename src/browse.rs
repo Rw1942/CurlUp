@@ -21,45 +21,19 @@ use crate::dom::multilens::extract_multilens;
 use crate::dom::multilens::snapshot::fetch_rendered_html;
 use crate::dom::reader::{extract_reader_content, is_probably_readable, ReaderContent};
 use crate::render::build_render_lines;
-use crate::term::{clear_screen, terminal_width};
+use crate::term::terminal_width;
 
 /// History entry for navigation
 struct HistoryEntry {
     url: String,
-    title: String,
-}
-
-impl HistoryEntry {
-    /// Get a short display name for this entry
-    fn display_name(&self) -> String {
-        // Prefer title, fall back to domain from URL
-        if !self.title.is_empty() && self.title.len() <= 20 {
-            self.title.clone()
-        } else if !self.title.is_empty() {
-            format!("{}...", &self.title[..17])
-        } else {
-            // Extract domain from URL
-            self.url
-                .trim_start_matches("https://")
-                .trim_start_matches("http://")
-                .split('/')
-                .next()
-                .map(|s| if s.len() > 20 { format!("{}...", &s[..17]) } else { s.to_string() })
-                .unwrap_or_else(|| "page".to_string())
-        }
-    }
 }
 
 /// Cached page state for toggling between modes without re-fetching
-#[allow(dead_code)]
 struct CachedPage {
     url: String,
-    html: String,
     standard_content: Option<PageContent>,
     reader_content: Option<ReaderContent>,
-    is_readable: bool,
 }
-
 
 /// Navigation state for back/forward
 struct NavState {
@@ -75,31 +49,17 @@ impl NavState {
         }
     }
     
-    /// Get the back destination display name, if any
-    fn back_destination(&self) -> Option<String> {
-        self.back_history.last().map(|e| e.display_name())
-    }
-    
-    /// Get the forward destination display name, if any
-    fn forward_destination(&self) -> Option<String> {
-        self.forward_history.last().map(|e| e.display_name())
-    }
-    
-    /// Navigate to a new page (clears forward history)
-    fn navigate_to(&mut self, from_url: &str, from_title: &str) {
+    fn navigate_to(&mut self, from_url: &str) {
         self.back_history.push(HistoryEntry {
             url: from_url.to_string(),
-            title: from_title.to_string(),
         });
-        self.forward_history.clear(); // Clear forward when navigating to new page
+        self.forward_history.clear();
     }
     
-    /// Go back, returns the URL to navigate to
-    fn go_back(&mut self, current_url: &str, current_title: &str) -> Option<String> {
+    fn go_back(&mut self, current_url: &str) -> Option<String> {
         if let Some(entry) = self.back_history.pop() {
             self.forward_history.push(HistoryEntry {
                 url: current_url.to_string(),
-                title: current_title.to_string(),
             });
             Some(entry.url)
         } else {
@@ -107,25 +67,15 @@ impl NavState {
         }
     }
     
-    /// Go forward, returns the URL to navigate to
-    fn go_forward(&mut self, current_url: &str, current_title: &str) -> Option<String> {
+    fn go_forward(&mut self, current_url: &str) -> Option<String> {
         if let Some(entry) = self.forward_history.pop() {
             self.back_history.push(HistoryEntry {
                 url: current_url.to_string(),
-                title: current_title.to_string(),
             });
             Some(entry.url)
         } else {
             None
         }
-    }
-    
-    fn can_go_back(&self) -> bool {
-        !self.back_history.is_empty()
-    }
-    
-    fn can_go_forward(&self) -> bool {
-        !self.forward_history.is_empty()
     }
 }
 
@@ -153,8 +103,41 @@ pub async fn run_interactive_with_options(
             println!("\n  {} Loading {}...\n", style("⟳").cyan(), truncate_url(&current_url, 50));
             
             // Navigate to current URL with stealth mode
-            browser::navigation::navigate_and_wait_with_stealth(client, &current_url, stealth).await?;
-            browser::navigation::scroll_to_top_after_load(client).await?;
+            if let Err(e) = browser::navigation::navigate_and_wait_with_stealth(client, &current_url, stealth).await {
+                // Show user-friendly error and let them try again
+                println!("\n  {} {}\n", style("✗").red().bold(), style("Failed to load site").red());
+                for line in e.to_string().lines() {
+                    println!("  {}", line);
+                }
+                println!();
+                
+                // Offer options
+                print!("  {} Enter new URL or 'q' to quit: ", style(">").cyan().bold());
+                io::stdout().flush()?;
+                
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+                let input = input.trim();
+                
+                if input.eq_ignore_ascii_case("q") || input.eq_ignore_ascii_case("quit") {
+                    return Ok(());
+                } else if input.is_empty() {
+                    // Go back if we have history, otherwise return to picker
+                    if let Some(url) = nav.go_back(&current_url) {
+                        current_url = url;
+                    } else {
+                        return Ok(());
+                    }
+                } else {
+                    current_url = normalize_url(input);
+                }
+                continue;
+            }
+            
+            if let Err(e) = browser::navigation::scroll_to_top_after_load(client).await {
+                // Non-fatal: just log and continue
+                eprintln!("  {} Scroll failed: {}", style("!").yellow(), e);
+            }
             
             // Fetch rendered HTML for both modes
             let html = fetch_rendered_html(client).await?;
@@ -179,10 +162,8 @@ pub async fn run_interactive_with_options(
             // Cache the page
             cached_page = Some(CachedPage {
                 url: current_url.clone(),
-                html,
                 standard_content,
                 reader_content,
-                is_readable,
             });
         }
         
@@ -192,28 +173,22 @@ pub async fn run_interactive_with_options(
         let use_condensed = condensed_active && cache.reader_content.is_some();
         
         // Build and display content
-        let (link_count, page_title) = if use_condensed {
+        let link_count = if use_condensed {
             let reader = cache.reader_content.as_ref().unwrap();
             let lines = build_reader_render_lines(reader);
             let count = reader.links.len().min(MAX_LINKS);
-            let title = reader.title.clone();
-            
-            // Display the page
-            display_page(&lines, &current_url, &nav, use_condensed, count, cache.is_readable);
-            (count, title)
+            display_page(&lines, &current_url, count);
+            count
         } else {
             let content = cache.standard_content.as_ref().unwrap();
             let lines = build_render_lines(content);
             let count = content.links.len().min(MAX_LINKS);
-            let title = get_page_title(content);
-            
-            // Display the page
-            display_page(&lines, &current_url, &nav, use_condensed, count, cache.is_readable);
-            (count, title)
+            display_page(&lines, &current_url, count);
+            count
         };
         
         // Get user input
-        match prompt_for_action(link_count, &nav, cache.is_readable, use_condensed)? {
+        match prompt_for_action(link_count)? {
             BrowseAction::FollowLink(num) => {
                 let link = if use_condensed {
                     cache.reader_content.as_ref().and_then(|r| r.get_link(num))
@@ -222,7 +197,7 @@ pub async fn run_interactive_with_options(
                 };
                 
                 if let Some(link) = link {
-                    nav.navigate_to(&current_url, &page_title);
+                    nav.navigate_to(&current_url);
                     current_url = link.href.clone();
                 } else {
                     println!("  {} Link #{} doesn't exist", style("!").yellow(), num);
@@ -230,7 +205,7 @@ pub async fn run_interactive_with_options(
                 }
             }
             BrowseAction::Back => {
-                if let Some(url) = nav.go_back(&current_url, &page_title) {
+                if let Some(url) = nav.go_back(&current_url) {
                     current_url = url;
                 } else {
                     println!("  {} You're at the first page", style("!").yellow());
@@ -238,7 +213,7 @@ pub async fn run_interactive_with_options(
                 }
             }
             BrowseAction::Forward => {
-                if let Some(url) = nav.go_forward(&current_url, &page_title) {
+                if let Some(url) = nav.go_forward(&current_url) {
                     current_url = url;
                 } else {
                     println!("  {} No forward history", style("!").yellow());
@@ -261,7 +236,7 @@ pub async fn run_interactive_with_options(
                 continue;
             }
             BrowseAction::GoToUrl(url) => {
-                nav.navigate_to(&current_url, &page_title);
+                nav.navigate_to(&current_url);
                 current_url = url;
             }
             BrowseAction::Home => {
@@ -309,93 +284,13 @@ enum BrowseAction {
 // UI Functions - Simple print-all approach with native terminal scrollback
 // ============================================================================
 
-/// Display a page with all content (supports native terminal scrollback)
-fn display_page(
-    lines: &[String],
-    url: &str,
-    nav: &NavState,
-    condensed_mode: bool,
-    link_count: usize,
-    is_readable: bool,
-) {
-    let width = terminal_width();
-    
-    // Clear screen for fresh display
-    clear_screen();
-    
-    // Header
-    println!("{}", style("─".repeat(width)).dim());
-    
-    // Build navigation indicator
-    let mut nav_parts = Vec::new();
-    if nav.can_go_back() {
-        nav_parts.push(format!("←{}", nav.back_history.len()));
-    }
-    if nav.can_go_forward() {
-        nav_parts.push(format!("{}→", nav.forward_history.len()));
-    }
-    let nav_indicator = if !nav_parts.is_empty() {
-        format!(" {} ", style(nav_parts.join(" ")).dim())
-    } else {
-        String::new()
-    };
-    
-    let mode_indicator = if condensed_mode {
-        format!(" {}", style("◆").magenta().bold())
-    } else {
-        String::new()
-    };
-    
-    println!(
-        "  {}{}{}  {}",
-        style("CurlUp").cyan().bold(),
-        mode_indicator,
-        nav_indicator,
-        style(truncate_url(url, width.saturating_sub(30))).dim()
-    );
-    println!("{}", style("─".repeat(width)).dim());
-    println!();
-    
-    // Print ALL content lines - user can scroll with native terminal scrollback
+/// Display a page with all content
+fn display_page(lines: &[String], url: &str, link_count: usize) {
+    println!("\n--- {} ---\n", url);
     for line in lines {
         println!("{}", line);
     }
-    
-    // Footer with command hints
-    println!();
-    println!("{}", style("─".repeat(width)).dim());
-    
-    // Build command hints
-    let mut hints: Vec<String> = Vec::new();
-    
-    if link_count > 0 {
-        hints.push(format!("[{}] link", style(format!("1-{}", link_count)).cyan()));
-    }
-    
-    // Back with destination
-    if let Some(dest) = nav.back_destination() {
-        hints.push(format!("[{}] ← {}", style("b").cyan(), style(dest).dim()));
-    }
-    
-    // Forward with destination
-    if let Some(dest) = nav.forward_destination() {
-        hints.push(format!("[{}] → {}", style("f").cyan(), style(dest).dim()));
-    }
-    
-    hints.push(format!("[{}] top", style("t").dim()));
-    hints.push(format!("[{}] home", style("h").cyan()));
-    hints.push(format!("[{}] quit", style("q").dim()));
-    
-    // Condensed mode toggle
-    if is_readable {
-        if condensed_mode {
-            hints.push(format!("[{}]", style("C:on").magenta().bold()));
-        } else {
-            hints.push(format!("[{}] reader", style("C").dim()));
-        }
-    }
-    
-    println!("  {}", hints.join("  "));
+    println!("\n--- {} links | b=back q=quit ---\n", link_count);
 }
 
 /// Print help information
@@ -430,12 +325,7 @@ fn print_help() {
 }
 
 /// Prompt for user action
-fn prompt_for_action(
-    link_count: usize,
-    _nav: &NavState,
-    _is_readable: bool,
-    _condensed_mode: bool,
-) -> Result<BrowseAction> {
+fn prompt_for_action(link_count: usize) -> Result<BrowseAction> {
     // Show prompt
     print!("\n  {} ", style(">").cyan().bold());
     io::stdout().flush()?;
@@ -636,33 +526,11 @@ fn colorize_reader_link_markers(line: &str) -> String {
     result
 }
 
-/// Get page title from content (extracts domain from URL)
-fn get_page_title(content: &PageContent) -> String {
-    // Extract domain from URL as the page title
-    content
-        .url
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .split('/')
-        .next()
-        .map(|s| truncate_text(s, 30))
-        .unwrap_or_else(|| "Unknown".to_string())
-}
-
 /// Truncate URL for display
 fn truncate_url(url: &str, max_len: usize) -> String {
     if url.len() <= max_len {
         url.to_string()
     } else {
         format!("{}...", &url[..max_len.saturating_sub(3)])
-    }
-}
-
-/// Truncate text for display
-fn truncate_text(text: &str, max_len: usize) -> String {
-    if text.len() <= max_len {
-        text.to_string()
-    } else {
-        format!("{}...", &text[..max_len.saturating_sub(3)])
     }
 }

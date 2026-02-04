@@ -1,12 +1,8 @@
 //! Page content and link types.
 
-use serde::Deserialize;
-
 /// A clickable link extracted from the page.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Link {
-    /// The visible text of the link
-    pub text: String,
     /// The URL this link points to
     pub href: String,
 }
@@ -14,8 +10,6 @@ pub struct Link {
 /// Page content with HTML and extracted links.
 #[derive(Debug, Clone)]
 pub struct PageContent {
-    /// The URL the content was extracted from
-    pub url: String,
     /// Raw HTML from the rendered page (for html2text rendering)
     pub html: String,
     /// Links extracted from the page (indexed by their display number)
@@ -23,8 +17,8 @@ pub struct PageContent {
 }
 
 impl PageContent {
-    pub fn new(url: String, html: String, links: Vec<Link>) -> Self {
-        Self { url, html, links }
+    pub fn new(html: String, links: Vec<Link>) -> Self {
+        Self { html, links }
     }
 
     /// Get a link by its 1-based display number

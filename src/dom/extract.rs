@@ -70,12 +70,12 @@ pub async fn extract_page_content(client: &Client, current_url: &str, focus: boo
     let result = client.execute(EXTRACT_LINKS_JS, vec![]).await?;
     let raw_links: Vec<RawLink> = serde_json::from_value(result).unwrap_or_default();
 
-    // Convert to typed Links
+    // Convert to typed Links (filter out empty text/href)
     let links: Vec<Link> = raw_links
         .into_iter()
         .filter_map(|l| match (l.text, l.href) {
             (Some(text), Some(href)) if !text.is_empty() && !href.is_empty() => {
-                Some(Link { text, href })
+                Some(Link { href })
             }
             _ => None,
         })
@@ -84,5 +84,5 @@ pub async fn extract_page_content(client: &Client, current_url: &str, focus: boo
     // Apply unified filtering
     let filtered = filter_links(links, Some(current_url));
 
-    Ok(PageContent::new(current_url.to_string(), html, filtered))
+    Ok(PageContent::new(html, filtered))
 }
