@@ -73,9 +73,8 @@ You should see Hacker News rendered as text with numbered links. Type `1` to fol
 ```bash
 curlup                          # Start with site picker
 curlup news.ycombinator.com     # Go directly to a site
-curlup -s example.com | less    # Single page mode (for piping)
-curlup --markdown example.com   # Output as Markdown (for LLMs, saving)
 curlup -m medium.com/article    # Multi-lens mode (cleaner articles)
+curlup -R medium.com/article    # Reader mode (article-focused view)
 curlup -v mail.google.com       # Visible browser (for login)
 ```
 
@@ -83,30 +82,27 @@ curlup -v mail.google.com       # Visible browser (for login)
 
 | Key | What it does |
 |-----|--------------|
-| `1-20` | Follow that link |
-| `j` or `Enter` | Scroll down |
-| `k` | Scroll up |
-| `gg` or `t` | Jump to top |
-| `g` | Jump to bottom |
+| `1-999` | Follow that link |
+| `R` | Toggle reader mode |
 | `b` | Go back |
 | `r` | Refresh |
 | `u` | Show current URL |
 | `h` | Help |
 | `q` | Quit |
 | `google.com` | Go to any URL |
+| `home` | Return to site picker |
 
 ### All Options
 
 ```
 curlup [OPTIONS] [URL]
 
-  -s, --single       Fetch once and exit (good for piping)
-  -r, --raw          Raw output, no formatting (implies -s)
-      --markdown     Output as Markdown (implies -s)
+  -R, --reader       Reader mode - extract just the article content
   -m, --multilens    Smart extraction for articles
   -v, --visible      Show the browser window
   -u, --user-agent   Custom user-agent string
       --no-stealth   Disable anti-bot measures
+      --no-focus     Show full page including navigation, ads
   -h, --help         Show help
 ```
 
@@ -158,9 +154,33 @@ curlup -v thesite.com
 
 ---
 
+## Reader Mode
+
+Use `-R` or press `R` while browsing to toggle reader mode. This extracts just the article content using Mozilla's Readability algorithm (same tech behind Firefox Reader View):
+
+- Strips navigation, ads, sidebars, and clutter
+- Shows article title, author, and estimated read time
+- Preserves links within the article
+- Auto-detects when pages have readable article content
+
+```bash
+curlup -R medium.com/@user/some-article   # Start in reader mode
+curlup news.ycombinator.com               # Press R on any article page
+```
+
+Reader mode works best on:
+- News articles (BBC, NYT, Reuters)
+- Blog posts (Medium, dev.to, personal blogs)
+- Documentation pages
+- Wikipedia articles
+
+If a page doesn't have extractable article content, CurlUp will tell you and stay in standard mode.
+
+---
+
 ## Multi-Lens Mode
 
-Use `-m` for articles, blog posts, and documentation. It runs four extraction strategies and picks the best result:
+Use `-m` for articles, blog posts, and documentation. It runs multiple extraction strategies and picks the best result:
 
 - CSS selectors (finds `<article>`, `<main>`, etc.)
 - DOM traversal (skips nav, footer, sidebars)
@@ -169,7 +189,6 @@ Use `-m` for articles, blog posts, and documentation. It runs four extraction st
 
 ```bash
 curlup -m medium.com/@user/some-article
-curlup -m -s docs.python.org/3/tutorial | less
 ```
 
 ---
@@ -206,4 +225,4 @@ MIT
 
 ## Credits
 
-Built with [fantoccini](https://github.com/jonhoo/fantoccini), [scraper](https://github.com/rust-scraper/scraper), [htmd](https://github.com/letmutex/htmd), [dom-content-extraction](https://github.com/oiwn/dom-content-extraction), [tokio](https://tokio.rs/), [clap](https://clap.rs/).
+Built with [fantoccini](https://github.com/jonhoo/fantoccini), [scraper](https://github.com/rust-scraper/scraper), [dom_smoothie](https://github.com/niklak/dom_smoothie) (reader mode), [html2text](https://github.com/jugglerchris/rust-html2text), [tokio](https://tokio.rs/), [clap](https://clap.rs/).

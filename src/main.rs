@@ -1,7 +1,5 @@
 use anyhow::{bail, Result};
 use clap::Parser;
-use std::io::Write;
-use std::process::{Command, Stdio};
 
 mod browse;
 mod browser;
@@ -15,10 +13,6 @@ mod term;
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = cli::Cli::parse();
-
-    // Determine if we should use single-page mode
-    // Raw mode, pager mode, and markdown mode imply single-page mode (for piping to other tools)
-    let single_mode = args.single || args.raw || args.pager || args.markdown;
 
     // Spawn ChromeDriver in the background
     let mut driver = browser::driver::spawn().await?;
@@ -45,77 +39,27 @@ async fn main() -> Result<()> {
     // Track focus mode (enabled by default)
     let focus = args.focus();
 
-    // Run in interactive browse mode (default) or single-page mode
-    if single_mode {
-        // Single page mode - fetch once and exit
-        browser::navigation::navigate_and_wait_with_stealth(&client, &current_url, stealth).await?;
+    // Track reader mode (disabled by default, can be enabled with -R flag)
+    let reader = args.reader;
 
-        // Extract content including links (use multilens if enabled, apply focus filtering)
-        let content = if args.multilens {
-            dom::multilens::extract_multilens(&client, &current_url, focus).await?
-        } else {
-            dom::extract::extract_page_content(&client, &current_url, focus).await?
-        };
-
-        // Build output lines - use markdown or plain text rendering
-        let output_lines = if args.markdown {
-            let mut lines = render::markdown::render_html_to_markdown(&content.html);
-            // Add links as markdown references
-            if !content.links.is_empty() {
-                lines.push(String::new());
-                lines.push("## Links".to_string());
-                lines.push(String::new());
-                for (i, link) in content.links.iter().take(20).enumerate() {
-                    lines.push(format!("[{}]: {} \"{}\"", i + 1, link.href, link.text));
-                }
-            }
-            lines
-        } else {
-            let lines = render::text::render_html(&content.html);
-            // Add plain link list for non-raw mode
-            if !args.raw && !content.links.is_empty() {
-                let mut with_links = lines;
-                with_links.push(String::new());
-                with_links.push("--- Links ---".to_string());
-                for (i, link) in content.links.iter().take(20).enumerate() {
-                    with_links.push(format!("[{}] {} -> {}", i + 1, link.text, link.href));
-                }
-                with_links
-            } else {
-                lines
-            }
-        };
-
-        if args.pager {
-            // Pager mode - pipe to system pager
-            let output = output_lines.join("\n") + "\n";
-            output_to_pager(&output)?;
-        } else {
-            // Direct output to stdout
-            for line in output_lines {
-                println!("{}", line);
-            }
-        }
-    } else {
-        // Interactive browsing mode (default)
-        // This loop allows returning to the start screen with 'home' command
-        loop {
-            match browse::run_interactive_with_options(&client, &current_url, stealth, args.multilens, focus).await {
-                Ok(()) => {
-                    // User exited browse mode (quit or home)
-                    // Try to show start screen again
-                    match picker::show_start_screen() {
-                        Ok(url) => {
-                            current_url = url;
-                            // Continue loop to browse new site
-                        }
-                        Err(_) => break, // User quit from start screen
+    // Interactive browsing mode
+    // This loop allows returning to the start screen with 'home' command
+    loop {
+        match browse::run_interactive_with_options(&client, &current_url, stealth, args.multilens, focus, reader).await {
+            Ok(()) => {
+                // User exited browse mode (quit or home)
+                // Try to show start screen again
+                match picker::show_start_screen() {
+                    Ok(url) => {
+                        current_url = url;
+                        // Continue loop to browse new site
                     }
+                    Err(_) => break, // User quit from start screen
                 }
-                Err(e) => {
-                    eprintln!("Error: {}", e);
-                    break;
-                }
+            }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                break;
             }
         }
     }
@@ -125,41 +69,6 @@ async fn main() -> Result<()> {
 
     // Clean up ChromeDriver process
     driver.kill().await?;
-
-    Ok(())
-}
-
-/// Output content to the system pager (less or $PAGER)
-fn output_to_pager(content: &str) -> Result<()> {
-    // Get pager from environment or default to less
-    let pager = std::env::var("PAGER").unwrap_or_else(|_| "less".to_string());
-
-    // Try to spawn the pager
-    let mut child = match Command::new(&pager)
-        .stdin(Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(_) => {
-            // Fallback: try less explicitly
-            match Command::new("less").stdin(Stdio::piped()).spawn() {
-                Ok(child) => child,
-                Err(_) => {
-                    // No pager available, just print to stdout
-                    print!("{}", content);
-                    return Ok(());
-                }
-            }
-        }
-    };
-
-    // Write content to pager's stdin
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(content.as_bytes());
-    }
-
-    // Wait for pager to exit
-    let _ = child.wait();
 
     Ok(())
 }

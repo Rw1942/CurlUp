@@ -22,8 +22,8 @@ url = "2.5"
 # HTML parsing for link extraction
 scraper = "0.25"
 
-# HTML to terminal text rendering
+# HTML to terminal text rendering with rich annotations
 html2text = "0.16"
 
-# HTML to Markdown conversion
-htmd = "0.5"
+# Reader mode - article extraction using Readability algorithm
+dom_smoothie = "0.14"
