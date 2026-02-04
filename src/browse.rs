@@ -22,11 +22,20 @@ struct HistoryEntry {
     title: String,
 }
 
-/// Run the interactive browsing session
+/// Run the interactive browsing session (with stealth enabled by default).
+#[allow(dead_code)]
 pub async fn run_interactive(
     client: &fantoccini::Client,
     initial_url: &str,
-    raw_mode: bool,
+) -> Result<()> {
+    run_interactive_with_stealth(client, initial_url, true).await
+}
+
+/// Run the interactive browsing session with stealth mode option
+pub async fn run_interactive_with_stealth(
+    client: &fantoccini::Client,
+    initial_url: &str,
+    stealth: bool,
 ) -> Result<()> {
     let mut history: Vec<HistoryEntry> = Vec::new();
     let mut current_url = initial_url.to_string();
@@ -38,22 +47,14 @@ pub async fn run_interactive(
             print_loading_inline();
         }
         
-        // Navigate to current URL
-        browser::navigation::navigate_and_wait(client, &current_url).await?;
+        // Navigate to current URL with stealth mode
+        browser::navigation::navigate_and_wait_with_stealth(client, &current_url, stealth).await?;
         browser::navigation::scroll_to_top_after_load(client).await?;
         
         // Extract content with links
         let content = extract_page_content(client, &current_url).await?;
         
-        // Raw mode: just output text and exit (no screen clearing or headers)
-        if raw_mode {
-            crate::render::text::render(&content.lines);
-            println!();
-            print_raw_mode_footer(content.links.len());
-            return Ok(());
-        }
-        
-        // Interactive mode: clear screen and show header
+        // Clear screen and show header
         clear_screen();
         print_header(&current_url, history.len());
         
@@ -72,8 +73,7 @@ pub async fn run_interactive(
                     });
                     current_url = link.href.clone();
                     println!(
-                        "\n  {} Following link to {}",
-                        style("→").green(),
+                        "\n  > Following link to {}",
                         style(truncate_text(&link.text, 40)).white()
                     );
                 } else {
@@ -83,8 +83,7 @@ pub async fn run_interactive(
             BrowseAction::Back => {
                 if let Some(entry) = history.pop() {
                     println!(
-                        "\n  {} Going back to {}",
-                        style("←").yellow(),
+                        "\n  < Going back to {}",
                         style(truncate_text(&entry.title, 40)).white()
                     );
                     current_url = entry.url;
@@ -93,7 +92,7 @@ pub async fn run_interactive(
                 }
             }
             BrowseAction::Refresh => {
-                println!("\n  {} Refreshing...", style("⟳").cyan());
+                println!("\n  Refreshing...");
             }
             BrowseAction::Quit => {
                 print_goodbye();
@@ -165,8 +164,7 @@ fn prompt_for_action(
     
     let summary = links_summary_line(content, show_tip);
     let prompt = format!(
-        "  {} {}{}{} ",
-        style("→").green().bold(),
+        "  > {}{}{} ",
         style("q:quit h:help").dim(),
         back_hint,
         link_hint,
@@ -246,7 +244,7 @@ fn print_header(url: &str, history_depth: usize) {
     let width = terminal_width();
     
     let back_indicator = if history_depth > 0 {
-        format!(" {} ", style(format!("← {}", history_depth)).dim())
+        format!(" {} ", style(format!("[{}]", history_depth)).dim())
     } else {
         String::new()
     };
@@ -300,17 +298,6 @@ fn print_help() {
     println!("{}", style(help).cyan());
 }
 
-/// Print raw mode footer
-fn print_raw_mode_footer(link_count: usize) {
-    println!("{}", style("─".repeat(60)).dim());
-    println!(
-        "  {} {} links found. {}",
-        style("ℹ").cyan(),
-        link_count,
-        style("Raw mode - run without -r for interactive browsing").dim()
-    );
-}
-
 /// Print current URL
 fn print_current_url(url: &str) {
     println!();
@@ -322,25 +309,25 @@ fn print_current_url(url: &str) {
 
 /// Print error message
 fn print_error(msg: &str) {
-    println!("\n  {} {}", style("✗").red(), style(msg).red());
+    println!("\n  {}", style(msg).red());
     std::thread::sleep(std::time::Duration::from_millis(1500));
 }
 
 /// Print warning message
 fn print_warning(msg: &str) {
-    println!("\n  {} {}", style("!").yellow(), style(msg).yellow());
+    println!("\n  {}", style(msg).yellow());
     std::thread::sleep(std::time::Duration::from_millis(1500));
 }
 
 /// Print loading indicator inline
 fn print_loading_inline() {
-    print!("\n  {} Loading...", style("⟳").cyan());
+    print!("\n  Loading...");
     let _ = io::stdout().flush();
 }
 
 /// Print goodbye message
 fn print_goodbye() {
-    println!("\n  {} {}\n", style("👋").dim(), style("Goodbye!").dim());
+    println!("\n  {}\n", style("Goodbye!").dim());
 }
 
 /// Wait for user to press Enter
@@ -363,18 +350,18 @@ fn get_page_title(content: &PageContent) -> String {
 fn links_summary_line(content: &PageContent, show_tip: bool) -> String {
     let link_count = content.links.len();
     let link_summary = if link_count == 0 {
-        "Links: none".to_string()
+        "No links".to_string()
     } else {
         let shown = link_count.min(20);
         if link_count > shown {
-            format!("Links: {} shown (1-{}), {} more", shown, shown, link_count - shown)
+            format!("{} links inline (1-{})", shown, shown)
         } else {
-            format!("Links: {} (1-{})", shown, shown)
+            format!("{} links inline (1-{})", shown, shown)
         }
     };
 
     if show_tip {
-        format!("{} | Tip: enter a link number or URL", link_summary)
+        format!("{} | Tip: type a number to follow", link_summary)
     } else {
         link_summary
     }

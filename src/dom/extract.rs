@@ -36,13 +36,6 @@ struct LinkExtractResult {
     links: Option<Vec<RawLink>>,
 }
 
-/// Extract visible text content from the page.
-pub async fn extract_text(client: &Client) -> Result<Vec<String>> {
-    let url = client.current_url().await?;
-    let content = extract_page_content(client, url.as_str()).await?;
-    Ok(content.lines)
-}
-
 /// Extract page content including text and links.
 pub async fn extract_page_content(client: &Client, current_url: &str) -> Result<PageContent> {
     // Step 1: Get rendered HTML

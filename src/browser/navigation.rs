@@ -2,13 +2,58 @@ use anyhow::Result;
 use fantoccini::Client;
 use std::time::Duration;
 
-/// Navigate to URL and wait for page to be fully ready.
-///
-/// Simple 2-step approach:
-/// 1. Poll for document.readyState === 'complete' (max 8 seconds)
-/// 2. Fixed buffer for JS rendering to settle
+/// JavaScript to inject for stealth mode - hides automation indicators
+const STEALTH_JS: &str = r#"
+    // Hide webdriver property
+    Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+        configurable: true
+    });
+    
+    // Add fake plugins array (headless Chrome has empty plugins)
+    Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5],
+        configurable: true
+    });
+    
+    // Set realistic languages
+    Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en'],
+        configurable: true
+    });
+    
+    // Add chrome runtime object (missing in headless)
+    if (!window.chrome) {
+        window.chrome = {};
+    }
+    if (!window.chrome.runtime) {
+        window.chrome.runtime = {};
+    }
+    
+    // Hide automation-related properties
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ?
+            Promise.resolve({ state: Notification.permission }) :
+            originalQuery(parameters)
+    );
+"#;
+
+/// Navigate to URL and wait for page to be fully ready (with stealth enabled).
+#[allow(dead_code)]
 pub async fn navigate_and_wait(client: &Client, url: &str) -> Result<()> {
+    navigate_and_wait_with_stealth(client, url, true).await
+}
+
+/// Navigate to URL with optional stealth mode.
+pub async fn navigate_and_wait_with_stealth(client: &Client, url: &str, stealth: bool) -> Result<()> {
     client.goto(url).await?;
+
+    // Inject stealth JavaScript immediately after navigation
+    if stealth {
+        // Ignore errors - some pages may block script execution
+        let _ = client.execute(STEALTH_JS, vec![]).await;
+    }
 
     // Wait for document ready (max 8 seconds)
     let ready_script = r#"return document.readyState === 'complete';"#;
@@ -17,6 +62,11 @@ pub async fn navigate_and_wait(client: &Client, url: &str) -> Result<()> {
             break;
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+
+    // Re-inject stealth JS after page is ready (in case page overwrote properties)
+    if stealth {
+        let _ = client.execute(STEALTH_JS, vec![]).await;
     }
 
     // Fixed buffer for JS rendering

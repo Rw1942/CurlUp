@@ -20,6 +20,8 @@ EXAMPLES:
     curlup github.com/trending          Browse GitHub trending repos
     curlup -s example.com | less        Pipe single page to less
     curlup -v mail.google.com           Visible browser for login
+    curlup --user-agent "MyBot/1.0"     Use custom user-agent
+    curlup --no-stealth -v              Debug mode without stealth
 
 REQUIREMENTS:
     • Google Chrome installed
@@ -40,4 +42,12 @@ pub struct Cli {
     /// Raw output mode (no formatting, all lines separate - implies --single)
     #[arg(long, short = 'r')]
     pub raw: bool,
+
+    /// Custom user-agent string (overrides default stealth user-agent)
+    #[arg(long, short = 'u', value_name = "STRING")]
+    pub user_agent: Option<String>,
+
+    /// Disable stealth mode (anti-detection measures)
+    #[arg(long)]
+    pub no_stealth: bool,
 }

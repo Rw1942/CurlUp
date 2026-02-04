@@ -21,9 +21,15 @@ async fn main() -> Result<()> {
     // Spawn ChromeDriver in the background
     let mut driver = browser::driver::spawn().await?;
 
-    // Connect to ChromeDriver (headless unless --visible flag is set)
-    let headless = !args.visible;
-    let client = browser::chrome::connect(&driver.url(), headless).await?;
+    // Build Chrome configuration
+    let chrome_config = browser::chrome::ChromeConfig {
+        headless: !args.visible,
+        stealth: !args.no_stealth,
+        user_agent: args.user_agent.clone(),
+    };
+
+    // Connect to ChromeDriver with stealth settings
+    let client = browser::chrome::connect(&driver.url(), &chrome_config).await?;
 
     // Get initial URL from argument or interactive picker
     let mut current_url = match args.url {
@@ -31,25 +37,34 @@ async fn main() -> Result<()> {
         None => picker::show_start_screen()?,
     };
 
+    // Track stealth mode for navigation
+    let stealth = chrome_config.stealth;
+
     // Run in interactive browse mode (default) or single-page mode
     if single_mode {
         // Single page mode - fetch once and exit
-        browser::navigation::navigate_and_wait(&client, &current_url).await?;
+        browser::navigation::navigate_and_wait_with_stealth(&client, &current_url, stealth).await?;
 
-        // Extract text content from the DOM
-        let text = dom::extract::extract_text(&client).await?;
+        // Extract content including links
+        let content = dom::extract::extract_page_content(&client, &current_url).await?;
+        let link_count = content.links.len();
 
         // Render to terminal (condensed by default, raw if requested)
         if args.raw {
-            render::text::render(&text);
+            render::text::render(&content.lines);
         } else {
-            render::text::render_condensed(&text);
+            render::text::render_condensed(&content.lines);
         }
+
+        // Print link count footer
+        println!();
+        println!("────────────────────────────────────────────────────────────");
+        println!("  {} links found. Run without -s/-r for interactive browsing.", link_count);
     } else {
         // Interactive browsing mode (default)
         // This loop allows returning to the start screen with 'home' command
         loop {
-            match browse::run_interactive(&client, &current_url, false).await {
+            match browse::run_interactive_with_stealth(&client, &current_url, stealth).await {
                 Ok(()) => {
                     // User exited browse mode (quit or home)
                     // Try to show start screen again

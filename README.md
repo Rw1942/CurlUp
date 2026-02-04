@@ -102,11 +102,36 @@ Arguments:
   [URL]  URL to navigate to (optional - shows site picker if omitted)
 
 Options:
-  -s, --single   Single-page mode (fetch once and exit, good for piping)
-  -v, --visible  Launch Chrome in visible mode (useful for login/debug)
-  -r, --raw      Raw output mode (no formatting - implies --single)
-  -h, --help     Print help
-  -V, --version  Print version
+  -s, --single              Single-page mode (fetch once and exit, good for piping)
+  -v, --visible             Launch Chrome in visible mode (useful for login/debug)
+  -r, --raw                 Raw output mode (no formatting - implies --single)
+  -u, --user-agent <STRING> Custom user-agent string (overrides default)
+      --no-stealth          Disable stealth mode (anti-detection measures)
+  -h, --help                Print help
+  -V, --version             Print version
+```
+
+### Stealth Mode
+
+CurlUp includes built-in stealth mode (enabled by default) to avoid being detected as a headless browser by websites. This helps access sites that block automated browsers.
+
+**What stealth mode does:**
+- Sets a realistic Chrome user-agent string
+- Disables `navigator.webdriver` property detection
+- Removes automation indicators (`enable-automation` switch)
+- Masks browser plugins and language properties
+- Uses a realistic window size (1920x1080)
+
+**Custom user-agent:**
+```bash
+# Override with your own user-agent
+curlup --user-agent "MyBot/1.0 (+https://example.com/bot)"
+curlup -u "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/145.0.0.0"
+```
+
+**Disable stealth for debugging:**
+```bash
+curlup --no-stealth -v  # Visible browser, no anti-detection
 ```
 
 ### How It Works

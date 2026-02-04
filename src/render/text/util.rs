@@ -115,16 +115,6 @@ pub(super) fn wrap_text(text: &str, width: usize, indent: usize) -> Vec<String> 
 
     lines
 }
-
-/// Create a horizontal separator line.
-///
-/// # Arguments
-/// * `width` - Desired width (capped at 80)
-/// * `ch` - Character to repeat
-pub(super) fn separator(width: usize, ch: char) -> String {
-    ch.to_string().repeat(width.min(80))
-}
-
 /// Remove excessive consecutive blank lines.
 ///
 /// Limits to max 2 consecutive blank lines and trims leading/trailing blanks.
