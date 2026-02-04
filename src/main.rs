@@ -8,6 +8,7 @@ mod dom;
 mod error;
 mod picker;
 mod render;
+mod term;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -33,7 +34,7 @@ async fn main() -> Result<()> {
     // Run in interactive browse mode (default) or single-page mode
     if single_mode {
         // Single page mode - fetch once and exit
-        browser::session::navigate_and_wait(&client, &current_url).await?;
+        browser::navigation::navigate_and_wait(&client, &current_url).await?;
 
         // Extract text content from the DOM
         let text = dom::extract::extract_text(&client).await?;

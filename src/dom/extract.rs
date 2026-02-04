@@ -3,7 +3,7 @@ use fantoccini::Client;
 use serde::Deserialize;
 use std::time::Duration;
 
-use super::links::{Link, PageContent};
+use super::content::{Link, PageContent};
 
 /// Raw extraction result from JavaScript.
 /// Fields are Option to handle null values from Chrome.

@@ -10,22 +10,26 @@ CurlUp is fully functional with an extensible text parsing engine tested against
 CurlUp/
 ├── Cargo.toml           # Project manifest with dependencies
 ├── README.md            # User documentation
-├── SITES.md             # Compatible websites list
-├── guide.md             # Original development guide
-├── progress.md          # This file
+├── docs/
+│   ├── SITES.md         # Compatible websites list
+│   ├── guide.md         # Original development guide
+│   ├── architecture.md  # Architecture overview
+│   └── progress.md      # This file
 ├── release/             # Pre-built binaries
 │   └── curlup-0.1.0-darwin-arm64/
 └── src/
     ├── main.rs          # Application entry point + URL normalization
     ├── cli.rs           # CLI argument parsing (clap)
     ├── error.rs         # Error types (thiserror)
+    ├── term.rs          # Terminal helpers
     ├── browser/
     │   ├── mod.rs       # Browser module exports
     │   ├── chrome.rs    # ChromeDriver connection with capabilities
     │   ├── driver.rs    # ChromeDriver process management
-    │   └── session.rs   # Page navigation and waiting
+    │   └── navigation.rs # Page navigation and waiting
     ├── dom/
     │   ├── mod.rs       # DOM module exports
+    │   ├── content.rs   # Link + PageContent types
     │   └── extract.rs   # Text extraction from DOM
     └── render/
         ├── mod.rs       # Render module exports

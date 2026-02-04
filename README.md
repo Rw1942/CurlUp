@@ -88,6 +88,11 @@ cp target/release/curlup ~/.local/bin/
 Build artifacts live under `target/`. If you create packaged releases under `release/`,
 keep them out of version control (they are generated outputs).
 
+## Documentation
+
+- [Documentation index](docs/README.md)
+- [Architecture overview](docs/architecture.md)
+
 ## Usage
 
 ```
@@ -370,7 +375,7 @@ See `src/render/text.rs` for the full API documentation.
 
 ## Compatible Sites
 
-See [SITES.md](SITES.md) for a full list of tested websites and compatibility ratings.
+See [docs/SITES.md](docs/SITES.md) for a full list of tested websites and compatibility ratings.
 
 **Best results:**
 - News aggregators: Google News, Hacker News, NPR, Reuters

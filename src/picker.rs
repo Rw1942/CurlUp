@@ -18,7 +18,7 @@ pub struct Site {
     pub emoji: &'static str,
 }
 
-/// Curated list of well-tested sites (from SITES.md with ★★★★☆+ ratings)
+/// Curated list of well-tested sites (from docs/SITES.md with ★★★★☆+ ratings)
 pub const SITES: &[Site] = &[
     Site {
         name: "Hacker News",

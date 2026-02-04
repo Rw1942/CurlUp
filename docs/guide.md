@@ -163,12 +163,13 @@ curlup/
     ├── browser/
     │   ├── mod.rs
     │   ├── chrome.rs
-    │   └── session.rs
+    │   └── navigation.rs
     ├── dom/
-    │   ├── mod.rs
+    │   ├── content.rs
     │   └── extract.rs
     ├── render/
     │   └── text.rs
+    ├── term.rs
     └── error.rs
 
 
@@ -446,7 +447,6 @@ This is intentional.
 ---
 
 ### A.4.1 Internal Errors (`thiserror`)
-
 Use enums to model **distinct failure modes**.
 
 ```rust

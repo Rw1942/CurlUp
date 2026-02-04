@@ -1,7 +1,4 @@
-//! Link extraction from web pages.
-//!
-//! This module extracts clickable links from the page and associates
-//! them with reference numbers for interactive navigation.
+//! Page content and link types.
 
 use serde::Deserialize;
 
@@ -29,7 +26,7 @@ impl PageContent {
     pub fn new(url: String, lines: Vec<String>, links: Vec<Link>) -> Self {
         Self { url, lines, links }
     }
-    
+
     /// Get a link by its 1-based display number
     pub fn get_link(&self, number: usize) -> Option<&Link> {
         if number == 0 || number > self.links.len() {

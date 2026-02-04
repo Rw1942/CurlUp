@@ -11,9 +11,10 @@ use console::style;
 use std::io::{self, Write};
 
 use crate::browser;
+use crate::dom::content::PageContent;
 use crate::dom::extract::extract_page_content;
-use crate::dom::links::PageContent;
 use crate::render::text::render_with_links_limited;
+use crate::term::{clear_line, clear_screen, content_area_height, move_cursor, terminal_height, terminal_width};
 
 /// History entry for back navigation
 struct HistoryEntry {
@@ -38,8 +39,8 @@ pub async fn run_interactive(
         }
         
         // Navigate to current URL
-        browser::session::navigate_and_wait(client, &current_url).await?;
-        browser::session::scroll_to_top_after_load(client).await?;
+        browser::navigation::navigate_and_wait(client, &current_url).await?;
+        browser::navigation::scroll_to_top_after_load(client).await?;
         
         // Extract content with links
         let content = extract_page_content(client, &current_url).await?;
@@ -239,20 +240,6 @@ fn normalize_url(url: &str) -> String {
     }
 }
 
-/// Clear terminal screen
-fn clear_screen() {
-    print!("\x1b[2J\x1b[1;1H");
-    let _ = io::stdout().flush();
-}
-
-fn move_cursor(row: usize, col: usize) {
-    print!("\x1b[{};{}H", row, col);
-}
-
-fn clear_line() {
-    print!("\x1b[2K");
-}
-
 /// Print page header with URL and navigation context
 fn print_header(url: &str, history_depth: usize) {
     let width = terminal_width();
@@ -370,30 +357,6 @@ fn get_page_title(content: &PageContent) -> String {
         .first()
         .map(|s| truncate_text(s, 30))
         .unwrap_or_else(|| "Unknown".to_string())
-}
-
-/// Get terminal width
-fn terminal_width() -> usize {
-    std::env::var("COLUMNS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(80)
-        .min(100)
-}
-
-fn terminal_height() -> usize {
-    std::env::var("LINES")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(24)
-        .max(10)
-        .min(80)
-}
-
-fn content_area_height(terminal_height: usize) -> usize {
-    let header_height = 5;
-    let bottom_bar_height = 2;
-    terminal_height.saturating_sub(header_height + bottom_bar_height).max(3)
 }
 
 fn links_summary_line(content: &PageContent, show_tip: bool) -> String {
