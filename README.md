@@ -229,6 +229,16 @@ See [docs/](docs/) for architecture details.
 
 ---
 
+Starting CurlUp:
+
+<img width="681" height="674" alt="image" src="https://github.com/user-attachments/assets/5c892291-f61d-40ca-8f6f-266d3c661505" />
+
+Opening Links
+<img width="660" height="678" alt="Screenshot 2026-02-04 at 3 01 07 PM" src="https://github.com/user-attachments/assets/720a212e-cb45-490a-b181-43e881ede81c" />
+
+Opening pages in Reader mode
+<img width="1034" height="643" alt="Screenshot 2026-02-04 at 3 01 43 PM" src="https://github.com/user-attachments/assets/08d453bf-8ae4-4050-b7a1-33f1a1623fe3" />
+
 ## License
 
 MIT
