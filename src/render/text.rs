@@ -7,19 +7,7 @@
 //! - **HTML rendering**: Converting HTML to readable terminal text via html2text
 //! - **Link rendering**: Displaying clickable links with numbered annotations
 
-mod links;
-mod util;
-
-use crate::dom::content::PageContent;
-pub use self::links::build_render_with_links_lines;
-use self::util::terminal_width;
-
-/// Build formatted lines with link annotations without printing.
-/// Use this when you need to handle display yourself (e.g., scrolling).
-pub fn build_render_lines(content: &PageContent) -> Vec<String> {
-    let width = terminal_width();
-    build_render_with_links_lines(content, width)
-}
+use super::util::terminal_width;
 
 // ============================================================================
 // PUBLIC API
@@ -40,13 +28,6 @@ pub fn render_html_to_width(html: &str, width: usize) -> Vec<String> {
         Ok(text) => text.lines().map(|s| s.to_string()).collect(),
         Err(_) => vec!["[Error rendering HTML]".to_string()],
     }
-}
-
-
-/// Format lines for terminal display using html2text.
-/// Called by the links module for content with link annotations.
-pub fn format_for_terminal(html: &str, width: usize) -> Vec<String> {
-    render_html_to_width(html, width)
 }
 
 // ============================================================================

@@ -17,8 +17,8 @@ async fn main() -> Result<()> {
     let args = cli::Cli::parse();
 
     // Determine if we should use single-page mode
-    // Raw mode and pager mode imply single-page mode (for piping to other tools)
-    let single_mode = args.single || args.raw || args.pager;
+    // Raw mode, pager mode, and markdown mode imply single-page mode (for piping to other tools)
+    let single_mode = args.single || args.raw || args.pager || args.markdown;
 
     // Spawn ChromeDriver in the background
     let mut driver = browser::driver::spawn().await?;
@@ -58,14 +58,22 @@ async fn main() -> Result<()> {
         };
         let link_count = content.links.len();
 
-        // Build output lines using html2text for clean terminal rendering
-        let output_lines = render::text::render_html(&content.html);
+        // Build output lines - use markdown or plain text rendering
+        let output_lines = if args.markdown {
+            render::markdown::render_html_to_markdown(&content.html)
+        } else {
+            render::text::render_html(&content.html)
+        };
 
-        // Add footer
-        let footer = format!(
-            "\n────────────────────────────────────────────────────────────\n  {} links found. Run without -s/-r/-p for interactive browsing.",
-            link_count
-        );
+        // Add footer (skip for markdown mode to keep output clean for piping)
+        let footer = if args.markdown {
+            String::new()
+        } else {
+            format!(
+                "\n────────────────────────────────────────────────────────────\n  {} links found. Run without -s/-r/-p for interactive browsing.",
+                link_count
+            )
+        };
 
         if args.pager {
             // Pager mode - pipe to system pager
@@ -76,7 +84,9 @@ async fn main() -> Result<()> {
             for line in output_lines {
                 println!("{}", line);
             }
-            println!("{}", footer);
+            if !footer.is_empty() {
+                println!("{}", footer);
+            }
         }
     } else {
         // Interactive browsing mode (default)

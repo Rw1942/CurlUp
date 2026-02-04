@@ -14,7 +14,7 @@ use crate::browser;
 use crate::dom::content::PageContent;
 use crate::dom::extract::extract_page_content;
 use crate::dom::multilens::extract_multilens;
-use crate::render::text::build_render_lines;
+use crate::render::markdown::build_render_lines;
 use crate::term::{clear_screen, terminal_width};
 
 /// History entry for back navigation

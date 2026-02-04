@@ -14,6 +14,7 @@ INTERACTIVE MODE (default):
 SINGLE-PAGE MODE:
     curlup -s news.google.com           Fetch page once and exit (good for piping)
     curlup -s -r news.google.com        Raw output for scripting
+    curlup --markdown example.com       Output as Markdown (implies -s)
 
 EXAMPLES:
     curlup                              Pick a site interactively, then browse
@@ -64,6 +65,10 @@ pub struct Cli {
     /// Disable focus mode - show full page including navigation, ads, etc.
     #[arg(long)]
     pub no_focus: bool,
+
+    /// Output as Markdown instead of plain text (implies --single)
+    #[arg(long)]
+    pub markdown: bool,
 }
 
 impl Cli {

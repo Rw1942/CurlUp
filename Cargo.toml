@@ -24,3 +24,6 @@ scraper = "0.25"
 
 # HTML to terminal text rendering
 html2text = "0.16"
+
+# HTML to Markdown conversion
+htmd = "0.5"

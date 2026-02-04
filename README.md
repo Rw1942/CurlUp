@@ -74,6 +74,7 @@ You should see Hacker News rendered as text with numbered links. Type `1` to fol
 curlup                          # Start with site picker
 curlup news.ycombinator.com     # Go directly to a site
 curlup -s example.com | less    # Single page mode (for piping)
+curlup --markdown example.com   # Output as Markdown (for LLMs, saving)
 curlup -m medium.com/article    # Multi-lens mode (cleaner articles)
 curlup -v mail.google.com       # Visible browser (for login)
 ```
@@ -101,6 +102,7 @@ curlup [OPTIONS] [URL]
 
   -s, --single       Fetch once and exit (good for piping)
   -r, --raw          Raw output, no formatting (implies -s)
+      --markdown     Output as Markdown (implies -s)
   -m, --multilens    Smart extraction for articles
   -v, --visible      Show the browser window
   -u, --user-agent   Custom user-agent string
@@ -204,4 +206,4 @@ MIT
 
 ## Credits
 
-Built with [fantoccini](https://github.com/jonhoo/fantoccini), [scraper](https://github.com/rust-scraper/scraper), [dom-content-extraction](https://github.com/oiwn/dom-content-extraction), [tokio](https://tokio.rs/), [clap](https://clap.rs/).
+Built with [fantoccini](https://github.com/jonhoo/fantoccini), [scraper](https://github.com/rust-scraper/scraper), [htmd](https://github.com/letmutex/htmd), [dom-content-extraction](https://github.com/oiwn/dom-content-extraction), [tokio](https://tokio.rs/), [clap](https://clap.rs/).
