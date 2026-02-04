@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use clap::Parser;
 
+mod brand;
 mod browse;
 mod browser;
 mod cli;
@@ -39,13 +40,13 @@ async fn main() -> Result<()> {
     // Track focus mode (enabled by default)
     let focus = args.focus();
 
-    // Track reader mode (disabled by default, can be enabled with -R flag)
-    let reader = args.reader;
+    // Track condensed mode (enabled by default, can be disabled with -N flag)
+    let condensed = args.condensed();
 
     // Interactive browsing mode
     // This loop allows returning to the start screen with 'home' command
     loop {
-        match browse::run_interactive_with_options(&client, &current_url, stealth, args.multilens, focus, reader).await {
+        match browse::run_interactive_with_options(&client, &current_url, stealth, args.multilens, focus, condensed).await {
             Ok(()) => {
                 // User exited browse mode (quit or home)
                 // Try to show start screen again

@@ -74,30 +74,46 @@ You should see Hacker News rendered as text with numbered links. Type `1` to fol
 curlup                          # Start with site picker
 curlup news.ycombinator.com     # Go directly to a site
 curlup -m medium.com/article    # Multi-lens mode (cleaner articles)
-curlup -R medium.com/article    # Reader mode (article-focused view)
+curlup -N medium.com/article    # Full page (disable auto-condensed)
 curlup -v mail.google.com       # Visible browser (for login)
 ```
 
 ### While Browsing
 
-| Key | What it does |
-|-----|--------------|
-| `1-999` | Follow that link |
-| `R` | Toggle reader mode |
-| `b` | Go back |
-| `r` | Refresh |
+CurlUp features a **floating command bar** that stays visible while you read. The bar shows where `b` (back) and `f` (forward) will take you. Type a command and press **Enter** to execute it.
+
+| Command | What it does |
+|---------|--------------|
+| `1-999` | Follow that link number |
+| `b` | Go back (shows destination) |
+| `f` | Go forward (shows destination) |
+| `C` | Toggle condensed/reader mode |
+| `r` | Refresh the page |
 | `u` | Show current URL |
-| `h` | Help |
-| `q` | Quit |
-| `google.com` | Go to any URL |
+| `h` | Show help |
+| `q` | Quit CurlUp |
+| `google.com` | Navigate to any URL |
 | `home` | Return to site picker |
+
+**Scrolling** (for long pages):
+
+| Command | What it does |
+|---------|--------------|
+| `j` / `k` | Scroll down/up one line |
+| `e` / `d` | Page up/down |
+| `g` / `G` | Jump to top/bottom |
+| Enter (empty) | Scroll down a few lines |
+
+The scroll position indicator on the right shows `↑↓ 50%` style progress.
+
+**Example:** To follow link 5, type `5` then press Enter. Type `b` to go back to the previous page (the footer shows where you'll go).
 
 ### All Options
 
 ```
 curlup [OPTIONS] [URL]
 
-  -R, --reader       Reader mode - extract just the article content
+  -N, --no-condensed Disable condensed mode (show full page for articles)
   -m, --multilens    Smart extraction for articles
   -v, --visible      Show the browser window
   -u, --user-agent   Custom user-agent string
@@ -154,27 +170,29 @@ curlup -v thesite.com
 
 ---
 
-## Reader Mode
+## Condensed Mode
 
-Use `-R` or press `R` while browsing to toggle reader mode. This extracts just the article content using Mozilla's Readability algorithm (same tech behind Firefox Reader View):
+Condensed mode automatically activates when CurlUp detects article content, extracting just the article using Mozilla's Readability algorithm (same tech behind Firefox Reader View):
 
 - Strips navigation, ads, sidebars, and clutter
 - Shows article title, author, and estimated read time
 - Preserves links within the article
-- Auto-detects when pages have readable article content
+- Auto-enabled when pages have readable article content
 
 ```bash
-curlup -R medium.com/@user/some-article   # Start in reader mode
-curlup news.ycombinator.com               # Press R on any article page
+curlup medium.com/@user/some-article      # Auto-enters condensed mode
+curlup -N medium.com/@user/some-article   # Force full page view
 ```
 
-Reader mode works best on:
+Press `C` while browsing to toggle between condensed and full page view.
+
+Condensed mode works best on:
 - News articles (BBC, NYT, Reuters)
 - Blog posts (Medium, dev.to, personal blogs)
 - Documentation pages
 - Wikipedia articles
 
-If a page doesn't have extractable article content, CurlUp will tell you and stay in standard mode.
+If a page doesn't have extractable article content, CurlUp will show the full page.
 
 ---
 
@@ -225,4 +243,4 @@ MIT
 
 ## Credits
 
-Built with [fantoccini](https://github.com/jonhoo/fantoccini), [scraper](https://github.com/rust-scraper/scraper), [dom_smoothie](https://github.com/niklak/dom_smoothie) (reader mode), [html2text](https://github.com/jugglerchris/rust-html2text), [tokio](https://tokio.rs/), [clap](https://clap.rs/).
+Built with [fantoccini](https://github.com/jonhoo/fantoccini), [scraper](https://github.com/rust-scraper/scraper), [dom_smoothie](https://github.com/niklak/dom_smoothie) (condensed mode), [html2text](https://github.com/jugglerchris/rust-html2text), [tokio](https://tokio.rs/), [clap](https://clap.rs/).

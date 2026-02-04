@@ -1,4 +1,4 @@
-//! Reader mode content extraction using Mozilla's Readability algorithm.
+//! Condensed mode content extraction using Mozilla's Readability algorithm.
 //!
 //! This module provides article-focused content extraction that removes
 //! navigation, ads, and other clutter to present clean, readable text.
@@ -12,7 +12,7 @@ use super::link_filter::filter_links;
 /// Average reading speed in words per minute
 const WORDS_PER_MINUTE: usize = 200;
 
-/// Article content extracted in reader mode.
+/// Article content extracted for condensed mode.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct ReaderContent {
@@ -55,7 +55,7 @@ impl ReaderContent {
 ///
 /// This is a quick heuristic check that should be called before attempting
 /// full article extraction. Returns `true` if the page appears to contain
-/// article content suitable for reader mode.
+/// article content suitable for condensed mode.
 pub fn is_probably_readable(html: &str) -> bool {
     // Use dom_smoothie's built-in detection
     match Readability::new(html, None, None) {
@@ -179,7 +179,7 @@ mod tests {
                     long enough for the readability algorithm to consider it
                     worth extracting as article content.</p>
                     <p>Here is another paragraph with a <a href="https://example.com">link</a>
-                    that should be preserved in reader mode.</p>
+                    that should be preserved in condensed mode.</p>
                     <p>And a third paragraph to add more content density.</p>
                 </article>
             </body>

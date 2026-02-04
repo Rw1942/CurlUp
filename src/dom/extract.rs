@@ -21,15 +21,27 @@ struct RawLink {
     href: Option<String>,
 }
 
-/// JavaScript that extracts links from the page.
-/// Only skips nav/header/footer elements - all other filtering done in Rust.
+/// JavaScript that extracts links from the main content area only.
+/// Looks for main content containers (main, article, [role="main"]), 
+/// falling back to body minus noise elements if not found.
 const EXTRACT_LINKS_JS: &str = r#"
 return (function() {
     var result = [];
     var skipSelectors = 'nav, header, footer, aside, [role="navigation"], [role="banner"], [role="contentinfo"], [aria-hidden="true"]';
     
-    document.querySelectorAll('a[href]').forEach(function(a) {
+    // Try to find main content container
+    var mainContent = document.querySelector('main, article, [role="main"], .main-content, #main-content, .post-content, .article-content, .entry-content');
+    
+    // If no main content found, use body but skip noise
+    var searchRoot = mainContent || document.body;
+    
+    searchRoot.querySelectorAll('a[href]').forEach(function(a) {
+        // Skip links in noise areas
         if (a.closest(skipSelectors)) return;
+        
+        // Skip links that are inside nested nav-like containers even within main
+        if (a.closest('.sidebar, .related-posts, .recommended, .trending, .comments')) return;
+        
         var text = (a.innerText || '').trim();
         if (text) {
             result.push({ text: text, href: a.href });

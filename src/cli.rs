@@ -18,7 +18,7 @@ EXAMPLES:
     curlup --user-agent "MyBot/1.0"     Use custom user-agent
     curlup --no-stealth -v              Debug mode without stealth
     curlup --no-focus reddit.com        Show full page including nav/ads
-    curlup -R medium.com/@user/article  Reader mode for articles
+    curlup -N medium.com/@user/article  Full page (disable auto-condensed)
 
 REQUIREMENTS:
     • Google Chrome installed
@@ -48,14 +48,19 @@ pub struct Cli {
     #[arg(long)]
     pub no_focus: bool,
 
-    /// Enable reader mode - extract just the article content (toggle with 'R' while browsing)
-    #[arg(long, short = 'R')]
-    pub reader: bool,
+    /// Disable condensed mode - show full page even for articles (toggle with 'C' while browsing)
+    #[arg(long, short = 'N')]
+    pub no_condensed: bool,
 }
 
 impl Cli {
     /// Returns true if focus mode is enabled (default: true, disabled with --no-focus)
     pub fn focus(&self) -> bool {
         !self.no_focus
+    }
+    
+    /// Returns true if condensed mode is enabled (default: true, disabled with --no-condensed)
+    pub fn condensed(&self) -> bool {
+        !self.no_condensed
     }
 }

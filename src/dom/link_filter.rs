@@ -8,18 +8,11 @@ use std::collections::HashSet;
 use super::content::Link;
 
 /// Maximum number of links to display/annotate.
-pub const MAX_LINKS: usize = 20;
-
-/// Minimum link text length (filters out navigation-like links).
-const MIN_TEXT_LEN: usize = 8;
-
-/// Maximum link text length (filters out overly long links).
-const MAX_TEXT_LEN: usize = 200;
+pub const MAX_LINKS: usize = 999;
 
 /// Filter and deduplicate a list of links.
 ///
 /// Applies consistent rules:
-/// - Text length between 8-200 characters
 /// - No javascript: URLs
 /// - No anchor-only links (# or #section)
 /// - No duplicates by href
@@ -31,11 +24,6 @@ pub fn filter_links(links: Vec<Link>, current_url: Option<&str>) -> Vec<Link> {
     links
         .into_iter()
         .filter(|link| {
-            // Length checks
-            if link.text.len() < MIN_TEXT_LEN || link.text.len() > MAX_TEXT_LEN {
-                return false;
-            }
-
             // Skip javascript: links
             if link.href.starts_with("javascript:") {
                 return false;
@@ -105,15 +93,6 @@ pub fn resolve_url(href: &str, base_url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_filter_short_text() {
-        let links = vec![Link {
-            text: "Click".to_string(),
-            href: "https://example.com".to_string(),
-        }];
-        assert!(filter_links(links, None).is_empty());
-    }
 
     #[test]
     fn test_filter_javascript() {

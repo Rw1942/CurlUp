@@ -10,6 +10,8 @@ use console::style;
 use dialoguer::{theme::ColorfulTheme, Input, Select};
 use std::io::{self, Write};
 
+use crate::brand;
+
 /// A curated site for the picker
 struct Site {
     name: &'static str,
@@ -116,10 +118,13 @@ fn normalize_url(url: &str) -> String {
     }
 }
 
-/// Print the welcome banner
+/// Print the welcome banner using brand colors
 fn print_welcome_banner() {
     let banner = include_str!("assets/banner.txt");
-    println!("{}", style(format!("\n{banner}")).cyan());
+    let build_time = env!("BUILD_TIMESTAMP");
+    // Use brand teal for the banner
+    println!("{}{}{}", brand::TEAL, format!("\n{banner}"), brand::RESET);
+    println!("  {}{}{}\n", brand::MIST, format!("Built: {}", build_time), brand::RESET);
 }
 
 /// Print loading message

@@ -3,14 +3,16 @@
 //! This module provides a polished terminal browsing experience:
 //! - Display page content with numbered links
 //! - Enter a number to follow that link
-//! - Native terminal scrollback for long content
+//! - Floating command bar that stays visible while scrolling
+//! - Page-based navigation with j/k, arrows, and Page Up/Down
 //! - Visual feedback and helpful prompts
-//! - Reader mode for article-focused reading
+//! - Condensed mode for article-focused reading (auto-enabled when available)
 
 use anyhow::Result;
 use console::style;
 use std::io::{self, Write};
 
+use crate::brand::{self, RESET};
 use crate::browser;
 use crate::dom::content::PageContent;
 use crate::dom::extract::extract_page_content;
@@ -19,12 +21,38 @@ use crate::dom::multilens::extract_multilens;
 use crate::dom::multilens::snapshot::fetch_rendered_html;
 use crate::dom::reader::{extract_reader_content, is_probably_readable, ReaderContent};
 use crate::render::build_render_lines;
-use crate::term::{clear_screen, terminal_width};
+use crate::term::{
+    clear_screen, terminal_width, terminal_height, content_area_height,
+    move_cursor, clear_line, clear_to_eol, reset_scroll_region,
+    hide_cursor, show_cursor, content_start_row, content_end_row, footer_start_row,
+    save_cursor, restore_cursor,
+};
 
-/// History entry for back navigation
+/// History entry for navigation
 struct HistoryEntry {
     url: String,
     title: String,
+}
+
+impl HistoryEntry {
+    /// Get a short display name for this entry
+    fn display_name(&self) -> String {
+        // Prefer title, fall back to domain from URL
+        if !self.title.is_empty() && self.title.len() <= 20 {
+            self.title.clone()
+        } else if !self.title.is_empty() {
+            format!("{}...", &self.title[..17])
+        } else {
+            // Extract domain from URL
+            self.url
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .split('/')
+                .next()
+                .map(|s| if s.len() > 20 { format!("{}...", &s[..17]) } else { s.to_string() })
+                .unwrap_or_else(|| "page".to_string())
+        }
+    }
 }
 
 /// Cached page state for toggling between modes without re-fetching
@@ -37,6 +65,146 @@ struct CachedPage {
     is_readable: bool,
 }
 
+/// View state for the current page display
+struct ViewState {
+    scroll_offset: usize,
+    total_lines: usize,
+}
+
+impl ViewState {
+    fn new() -> Self {
+        Self {
+            scroll_offset: 0,
+            total_lines: 0,
+        }
+    }
+    
+    fn reset(&mut self) {
+        self.scroll_offset = 0;
+    }
+    
+    fn set_total_lines(&mut self, total: usize) {
+        self.total_lines = total;
+    }
+    
+    /// Scroll up by n lines, clamping to top
+    fn scroll_up(&mut self, n: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(n);
+    }
+    
+    /// Scroll down by n lines, clamping to bottom
+    fn scroll_down(&mut self, n: usize) {
+        let max_offset = self.max_scroll_offset();
+        self.scroll_offset = (self.scroll_offset + n).min(max_offset);
+    }
+    
+    /// Jump to top
+    fn go_to_top(&mut self) {
+        self.scroll_offset = 0;
+    }
+    
+    /// Jump to bottom
+    fn go_to_bottom(&mut self) {
+        self.scroll_offset = self.max_scroll_offset();
+    }
+    
+    /// Maximum scroll offset (so last content line is at bottom of viewport)
+    fn max_scroll_offset(&self) -> usize {
+        let viewport = content_area_height();
+        self.total_lines.saturating_sub(viewport)
+    }
+    
+    /// Check if we can scroll down more
+    fn can_scroll_down(&self) -> bool {
+        self.scroll_offset < self.max_scroll_offset()
+    }
+    
+    /// Check if we can scroll up more
+    fn can_scroll_up(&self) -> bool {
+        self.scroll_offset > 0
+    }
+    
+    /// Get scroll percentage for display
+    fn scroll_percentage(&self) -> usize {
+        if self.total_lines == 0 {
+            return 100;
+        }
+        let max = self.max_scroll_offset();
+        if max == 0 {
+            return 100;
+        }
+        ((self.scroll_offset as f64 / max as f64) * 100.0).round() as usize
+    }
+}
+
+/// Navigation state for back/forward
+struct NavState {
+    back_history: Vec<HistoryEntry>,
+    forward_history: Vec<HistoryEntry>,
+}
+
+impl NavState {
+    fn new() -> Self {
+        Self {
+            back_history: Vec::new(),
+            forward_history: Vec::new(),
+        }
+    }
+    
+    /// Get the back destination display name, if any
+    fn back_destination(&self) -> Option<String> {
+        self.back_history.last().map(|e| e.display_name())
+    }
+    
+    /// Get the forward destination display name, if any
+    fn forward_destination(&self) -> Option<String> {
+        self.forward_history.last().map(|e| e.display_name())
+    }
+    
+    /// Navigate to a new page (clears forward history)
+    fn navigate_to(&mut self, from_url: &str, from_title: &str) {
+        self.back_history.push(HistoryEntry {
+            url: from_url.to_string(),
+            title: from_title.to_string(),
+        });
+        self.forward_history.clear(); // Clear forward when navigating to new page
+    }
+    
+    /// Go back, returns the URL to navigate to
+    fn go_back(&mut self, current_url: &str, current_title: &str) -> Option<String> {
+        if let Some(entry) = self.back_history.pop() {
+            self.forward_history.push(HistoryEntry {
+                url: current_url.to_string(),
+                title: current_title.to_string(),
+            });
+            Some(entry.url)
+        } else {
+            None
+        }
+    }
+    
+    /// Go forward, returns the URL to navigate to
+    fn go_forward(&mut self, current_url: &str, current_title: &str) -> Option<String> {
+        if let Some(entry) = self.forward_history.pop() {
+            self.back_history.push(HistoryEntry {
+                url: current_url.to_string(),
+                title: current_title.to_string(),
+            });
+            Some(entry.url)
+        } else {
+            None
+        }
+    }
+    
+    fn can_go_back(&self) -> bool {
+        !self.back_history.is_empty()
+    }
+    
+    fn can_go_forward(&self) -> bool {
+        !self.forward_history.is_empty()
+    }
+}
+
 /// Run the interactive browsing session with all options
 pub async fn run_interactive_with_options(
     client: &fantoccini::Client,
@@ -44,13 +212,16 @@ pub async fn run_interactive_with_options(
     stealth: bool,
     multilens: bool,
     focus: bool,
-    reader_mode: bool,
+    condensed_enabled: bool,
 ) -> Result<()> {
-    let mut history: Vec<HistoryEntry> = Vec::new();
+    let mut nav = NavState::new();
     let mut current_url = initial_url.to_string();
-    let mut first_page = true;
-    let mut reader_active = reader_mode;
+    // Condensed mode is auto-enabled when available (unless disabled via CLI)
+    let mut condensed_active = condensed_enabled;
     let mut cached_page: Option<CachedPage> = None;
+    let mut view_state = ViewState::new();
+    let mut needs_redraw = true;
+    let mut cached_lines: Vec<String> = Vec::new();
     
     loop {
         // Check if we need to fetch new content or can use cache
@@ -58,9 +229,7 @@ pub async fn run_interactive_with_options(
         
         if need_fetch {
             // Show loading indicator
-            if !first_page {
-                print_loading_inline();
-            }
+            show_loading_screen(&current_url);
             
             // Navigate to current URL with stealth mode
             browser::navigation::navigate_and_wait_with_stealth(client, &current_url, stealth).await?;
@@ -69,7 +238,7 @@ pub async fn run_interactive_with_options(
             // Fetch rendered HTML for both modes
             let html = fetch_rendered_html(client).await?;
             
-            // Check if page is suitable for reader mode
+            // Check if page is suitable for condensed mode
             let is_readable = is_probably_readable(&html);
             
             // Extract standard content
@@ -79,7 +248,7 @@ pub async fn run_interactive_with_options(
                 Some(extract_page_content(client, &current_url, focus).await?)
             };
             
-            // Extract reader content if readable
+            // Extract condensed content if readable
             let reader_content = if is_readable {
                 extract_reader_content(&html, &current_url)
             } else {
@@ -94,127 +263,174 @@ pub async fn run_interactive_with_options(
                 reader_content,
                 is_readable,
             });
+            
+            // Reset scroll to top for new page
+            view_state.reset();
+            needs_redraw = true;
         }
         
         let cache = cached_page.as_ref().unwrap();
         
-        // Determine if we should use reader mode
-        let use_reader = reader_active && cache.reader_content.is_some();
+        // Determine if we should use condensed mode
+        let use_condensed = condensed_active && cache.reader_content.is_some();
         
-        // Build lines for display based on mode
-        let (lines, link_count, page_title) = if use_reader {
-            let reader = cache.reader_content.as_ref().unwrap();
-            let lines = build_reader_render_lines(reader);
-            let count = reader.links.len().min(MAX_LINKS);
-            let title = reader.title.clone();
-            (lines, count, title)
+        // Build lines for display based on mode (only if needed)
+        let (link_count, page_title) = if needs_redraw {
+            let (lines, count, title) = if use_condensed {
+                let reader = cache.reader_content.as_ref().unwrap();
+                let lines = build_reader_render_lines(reader);
+                let count = reader.links.len().min(MAX_LINKS);
+                let title = reader.title.clone();
+                (lines, count, title)
+            } else {
+                let content = cache.standard_content.as_ref().unwrap();
+                let lines = build_render_lines(content);
+                let count = content.links.len().min(MAX_LINKS);
+                let title = get_page_title(content);
+                (lines, count, title)
+            };
+            
+            cached_lines = lines;
+            view_state.set_total_lines(cached_lines.len());
+            (count, title)
         } else {
-            let content = cache.standard_content.as_ref().unwrap();
-            let lines = build_render_lines(content);
-            let count = content.links.len().min(MAX_LINKS);
-            let title = get_page_title(content);
-            (lines, count, title)
+            // Use cached values
+            let count = if use_condensed {
+                cache.reader_content.as_ref().map(|r| r.links.len().min(MAX_LINKS)).unwrap_or(0)
+            } else {
+                cache.standard_content.as_ref().map(|c| c.links.len().min(MAX_LINKS)).unwrap_or(0)
+            };
+            let title = if use_condensed {
+                cache.reader_content.as_ref().map(|r| r.title.clone()).unwrap_or_default()
+            } else {
+                cache.standard_content.as_ref().map(get_page_title).unwrap_or_default()
+            };
+            (count, title)
         };
 
-        // Clear screen and show header
-        clear_screen();
-        print_header_with_mode(&current_url, history.len(), use_reader);
-
-        // Display all content - let user scroll with native terminal scrollback
-        for line in &lines {
-            println!("{}", line);
+        // Draw the full UI with floating header/footer
+        if needs_redraw {
+            draw_full_ui(&cached_lines, &view_state, &current_url, &nav, use_condensed, link_count, cache.is_readable);
+            needs_redraw = false;
         }
         
-        // Show reader mode hint if page is readable but not in reader mode
-        let show_reader_hint = cache.is_readable && !use_reader && first_page;
-        
-        // Get user input
-        match prompt_for_action_with_reader(link_count, history.len(), first_page, show_reader_hint, use_reader)? {
+        // Get user input with immediate key handling
+        match prompt_for_action_floating(link_count, &view_state)? {
             BrowseAction::FollowLink(num) => {
-                let link = if use_reader {
+                let link = if use_condensed {
                     cache.reader_content.as_ref().and_then(|r| r.get_link(num))
                 } else {
                     cache.standard_content.as_ref().and_then(|c| c.get_link(num))
                 };
                 
                 if let Some(link) = link {
-                    // Save current URL to history before navigating
-                    history.push(HistoryEntry {
-                        url: current_url.clone(),
-                        title: page_title.clone(),
-                    });
+                    nav.navigate_to(&current_url, &page_title);
                     current_url = link.href.clone();
-                    println!(
-                        "\n  > Following link to {}",
-                        style(truncate_text(&link.text, 40)).white()
-                    );
+                    needs_redraw = true;
                 } else {
-                    print_error(&format!("Link #{} doesn't exist", num));
+                    show_status_message(&format!("Link #{} doesn't exist", num), false);
                 }
             }
             BrowseAction::Back => {
-                if let Some(entry) = history.pop() {
-                    println!(
-                        "\n  < Going back to {}",
-                        style(truncate_text(&entry.title, 40)).white()
-                    );
-                    current_url = entry.url;
+                if let Some(url) = nav.go_back(&current_url, &page_title) {
+                    current_url = url;
+                    needs_redraw = true;
                 } else {
-                    print_warning("You're at the first page - nowhere to go back");
+                    show_status_message("You're at the first page", false);
+                }
+            }
+            BrowseAction::Forward => {
+                if let Some(url) = nav.go_forward(&current_url, &page_title) {
+                    current_url = url;
+                    needs_redraw = true;
+                } else {
+                    show_status_message("No forward history", false);
                 }
             }
             BrowseAction::Refresh => {
-                println!("\n  Refreshing...");
                 cached_page = None; // Force re-fetch
+                needs_redraw = true;
             }
             BrowseAction::Quit => {
-                print_goodbye();
+                cleanup_and_exit();
                 return Ok(());
             }
             BrowseAction::Help => {
-                print_help_with_reader();
-                wait_for_enter();
+                show_help_overlay();
+                needs_redraw = true;
             }
             BrowseAction::ShowUrl => {
-                print_current_url(&current_url);
-                wait_for_enter();
+                show_url_overlay(&current_url);
+                needs_redraw = true;
             }
             BrowseAction::GoToUrl(url) => {
-                history.push(HistoryEntry {
-                    url: current_url.clone(),
-                    title: page_title.clone(),
-                });
+                nav.navigate_to(&current_url, &page_title);
                 current_url = url;
+                needs_redraw = true;
             }
             BrowseAction::Home => {
-                // Go back to start screen
+                cleanup_and_exit();
                 return Ok(());
             }
-            BrowseAction::ToggleReader => {
+            BrowseAction::ToggleCondensed => {
                 if cache.reader_content.is_some() {
-                    reader_active = !reader_active;
-                    if reader_active {
-                        println!("\n  {} {}", 
-                            style("Reader mode").magenta().bold(),
-                            style("— showing article content only").dim()
-                        );
+                    condensed_active = !condensed_active;
+                    view_state.reset(); // Scroll to top on mode change
+                    needs_redraw = true;
+                    let msg = if condensed_active {
+                        "Switched to condensed mode"
                     } else {
-                        println!("\n  {} {}", 
-                            style("Standard mode").cyan().bold(),
-                            style("— showing full page").dim()
-                        );
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(400));
+                        "Switched to standard mode"
+                    };
+                    show_status_message(msg, true);
                 } else {
-                    print_warning("No article content detected - reader mode not available");
+                    show_status_message("No article content detected", false);
                 }
             }
+            BrowseAction::ScrollUp(n) => {
+                if view_state.can_scroll_up() {
+                    view_state.scroll_up(n);
+                    redraw_content_area(&cached_lines, &view_state);
+                    update_footer(link_count, &nav, use_condensed, cache.is_readable, &view_state);
+                }
+            }
+            BrowseAction::ScrollDown(n) => {
+                if view_state.can_scroll_down() {
+                    view_state.scroll_down(n);
+                    redraw_content_area(&cached_lines, &view_state);
+                    update_footer(link_count, &nav, use_condensed, cache.is_readable, &view_state);
+                }
+            }
+            BrowseAction::PageUp => {
+                let page_size = content_area_height().saturating_sub(2);
+                if view_state.can_scroll_up() {
+                    view_state.scroll_up(page_size);
+                    redraw_content_area(&cached_lines, &view_state);
+                    update_footer(link_count, &nav, use_condensed, cache.is_readable, &view_state);
+                }
+            }
+            BrowseAction::PageDown => {
+                let page_size = content_area_height().saturating_sub(2);
+                if view_state.can_scroll_down() {
+                    view_state.scroll_down(page_size);
+                    redraw_content_area(&cached_lines, &view_state);
+                    update_footer(link_count, &nav, use_condensed, cache.is_readable, &view_state);
+                }
+            }
+            BrowseAction::GoToTop => {
+                view_state.go_to_top();
+                redraw_content_area(&cached_lines, &view_state);
+                update_footer(link_count, &nav, use_condensed, cache.is_readable, &view_state);
+            }
+            BrowseAction::GoToBottom => {
+                view_state.go_to_bottom();
+                redraw_content_area(&cached_lines, &view_state);
+                update_footer(link_count, &nav, use_condensed, cache.is_readable, &view_state);
+            }
             BrowseAction::Invalid(input) => {
-                print_error(&format!("Unknown command: '{}' - press 'h' for help", input));
+                show_status_message(&format!("Unknown: '{}' (h for help)", input), false);
             }
         }
-
-        first_page = false;
     }
 }
 
@@ -222,121 +438,451 @@ pub async fn run_interactive_with_options(
 enum BrowseAction {
     FollowLink(usize),
     Back,
+    Forward,
     Refresh,
     Quit,
     Help,
     ShowUrl,
     GoToUrl(String),
     Home,
-    ToggleReader,
+    ToggleCondensed,
+    ScrollUp(usize),
+    ScrollDown(usize),
+    PageUp,
+    PageDown,
+    GoToTop,
+    GoToBottom,
     Invalid(String),
 }
 
-/// Prompt the user for an action (with reader mode support)
-fn prompt_for_action_with_reader(
+// ============================================================================
+// UI Drawing Functions
+// ============================================================================
+
+/// Draw the complete UI with floating header and footer
+fn draw_full_ui(
+    lines: &[String],
+    view_state: &ViewState,
+    url: &str,
+    nav: &NavState,
+    condensed_mode: bool,
     link_count: usize,
-    history_depth: usize,
-    show_tip: bool,
-    show_reader_hint: bool,
-    reader_active: bool,
-) -> Result<BrowseAction> {
-    println!();
-    println!("{}", style("─".repeat(terminal_width())).dim());
+    is_readable: bool,
+) {
+    let width = terminal_width();
+    let height = terminal_height();
     
-    // Show reader mode hint if applicable
-    if show_reader_hint {
-        println!(
-            "  {}",
-            style("Article detected - press R for reader mode").dim().italic()
-        );
+    // Clear screen and reset scroll region
+    reset_scroll_region();
+    clear_screen();
+    hide_cursor();
+    
+    // Draw header (rows 1-HEADER_HEIGHT)
+    draw_header(url, nav, condensed_mode, width);
+    
+    // Set up scroll region for content
+    let content_top = content_start_row();
+    let content_bottom = content_end_row();
+    
+    // Draw content area
+    draw_content_area(lines, view_state, content_top, content_bottom, width);
+    
+    // Draw footer (fixed at bottom)
+    draw_footer(link_count, nav, condensed_mode, is_readable, view_state, width, height);
+    
+    show_cursor();
+}
+
+/// Draw the header (stays fixed at top)
+fn draw_header(url: &str, nav: &NavState, condensed_mode: bool, width: usize) {
+    move_cursor(1, 1);
+    
+    // Separator line
+    println!("{}", style("─".repeat(width)).dim());
+    
+    // Build navigation indicator showing back/forward counts
+    let mut nav_parts = Vec::new();
+    if nav.can_go_back() {
+        nav_parts.push(format!("←{}", nav.back_history.len()));
     }
-    
-    // Build a clean, informative prompt line
-    let mut prompt_parts: Vec<String> = Vec::new();
-    
-    // Link navigation hint (most important action)
-    if link_count > 0 {
-        prompt_parts.push(format!(
-            "{}",
-            style(format!("1-{}", link_count)).cyan().bold()
-        ));
+    if nav.can_go_forward() {
+        nav_parts.push(format!("{}→", nav.forward_history.len()));
     }
-    
-    // Back navigation (only if history exists)
-    if history_depth > 0 {
-        prompt_parts.push(format!("{}", style("b").dim()));
-    }
-    
-    // Standard commands (lowercase)
-    prompt_parts.push(format!("{}", style("r").dim()));
-    prompt_parts.push(format!("{}", style("h").dim()));
-    prompt_parts.push(format!("{}", style("q").dim()));
-    
-    // Reader mode toggle (uppercase R, separated for clarity)
-    if reader_active {
-        prompt_parts.push(format!("{}", style("R:on").magenta().bold()));
-    } else {
-        prompt_parts.push(format!("{}", style("R").dim()));
-    }
-    
-    // First-time tip
-    let tip = if show_tip && link_count > 0 {
-        format!("  {}", style("type a number to follow a link").dim().italic())
+    let nav_indicator = if !nav_parts.is_empty() {
+        format!(" {} ", style(nav_parts.join(" ")).dim())
     } else {
         String::new()
     };
     
-    let prompt = format!("  {} >{}", prompt_parts.join(" "), tip);
-    print!("{} ", prompt);
-    io::stdout().flush()?;
+    let mode_indicator = if condensed_mode {
+        format!(" {}", style("◆").magenta().bold())
+    } else {
+        String::new()
+    };
     
+    println!(
+        "  {}{}{}  {}",
+        style("CurlUp").cyan().bold(),
+        mode_indicator,
+        nav_indicator,
+        style(truncate_url(url, width.saturating_sub(30))).dim()
+    );
+    
+    // Bottom separator
+    println!("{}", style("─".repeat(width)).dim());
+    
+    // Blank line before content
+    println!();
+}
+
+/// Draw the content area with current scroll position
+fn draw_content_area(lines: &[String], view_state: &ViewState, top_row: usize, bottom_row: usize, _width: usize) {
+    let viewport_height = bottom_row - top_row + 1;
+    let start_idx = view_state.scroll_offset;
+    let end_idx = (start_idx + viewport_height).min(lines.len());
+    
+    // Move to content area start
+    move_cursor(top_row, 1);
+    
+    // Draw visible lines
+    for i in start_idx..end_idx {
+        // Truncate line if too wide (preserving ANSI codes as much as possible)
+        let line = &lines[i];
+        println!("{}", line);
+    }
+    
+    // Fill remaining rows with blank lines
+    let lines_drawn = end_idx - start_idx;
+    for _ in lines_drawn..viewport_height {
+        println!();
+    }
+}
+
+/// Redraw only the content area (for scroll operations)
+fn redraw_content_area(lines: &[String], view_state: &ViewState) {
+    let content_top = content_start_row();
+    let content_bottom = content_end_row();
+    let width = terminal_width();
+    
+    hide_cursor();
+    draw_content_area(lines, view_state, content_top, content_bottom, width);
+    show_cursor();
+}
+
+/// Draw the footer (stays fixed at bottom)
+fn draw_footer(
+    link_count: usize,
+    nav: &NavState,
+    condensed_mode: bool,
+    is_readable: bool,
+    view_state: &ViewState,
+    width: usize,
+    _height: usize,
+) {
+    let footer_row = footer_start_row();
+    move_cursor(footer_row, 1);
+    
+    // Separator
+    println!("{}", style("─".repeat(width)).dim());
+    
+    // Build scroll indicator
+    let scroll_info = if view_state.total_lines > content_area_height() {
+        let pct = view_state.scroll_percentage();
+        let arrows = if view_state.can_scroll_up() && view_state.can_scroll_down() {
+            "↑↓"
+        } else if view_state.can_scroll_up() {
+            "↑ "
+        } else if view_state.can_scroll_down() {
+            " ↓"
+        } else {
+            "  "
+        };
+        format!("{} {}%", style(arrows).cyan(), pct)
+    } else {
+        String::new()
+    };
+    
+    // Build command hints
+    let mut hints: Vec<String> = Vec::new();
+    
+    if link_count > 0 {
+        hints.push(format!("[{}] link", style(format!("1-{}", link_count)).cyan()));
+    }
+    
+    // Back with destination
+    if let Some(dest) = nav.back_destination() {
+        hints.push(format!("[{}] ← {}", style("b").cyan(), style(dest).dim()));
+    }
+    
+    // Forward with destination
+    if let Some(dest) = nav.forward_destination() {
+        hints.push(format!("[{}] → {}", style("f").cyan(), style(dest).dim()));
+    }
+    
+    // Scroll hints if content is scrollable
+    if view_state.total_lines > content_area_height() {
+        hints.push(format!("[{}]", style("j/k").dim()));
+    }
+    
+    hints.push(format!("[{}]", style("h").dim()));
+    hints.push(format!("[{}]", style("q").dim()));
+    
+    // Condensed mode toggle
+    if is_readable {
+        if condensed_mode {
+            hints.push(format!("[{}]", style("C:on").magenta().bold()));
+        } else {
+            hints.push(format!("[{}]", style("C").dim()));
+        }
+    }
+    
+    // Print hints with scroll info on right
+    let hints_str = hints.join("  ");
+    let padding = width.saturating_sub(visible_width(&hints_str) + visible_width(&scroll_info) + 4);
+    print!("  {}{}{}", hints_str, " ".repeat(padding), scroll_info);
+    clear_to_eol();
+    println!();
+    
+    // Prompt line
+    print!("  {} ", style(">").cyan().bold());
+    let _ = io::stdout().flush();
+}
+
+/// Update just the footer area (for scroll position updates)
+fn update_footer(
+    link_count: usize,
+    nav: &NavState,
+    condensed_mode: bool,
+    is_readable: bool,
+    view_state: &ViewState,
+) {
+    let width = terminal_width();
+    let height = terminal_height();
+    
+    save_cursor();
+    hide_cursor();
+    draw_footer(link_count, nav, condensed_mode, is_readable, view_state, width, height);
+    restore_cursor();
+    show_cursor();
+}
+
+/// Calculate visible width of a string (ignoring ANSI codes)
+fn visible_width(s: &str) -> usize {
+    // Strip ANSI escape sequences for width calculation
+    let mut width = 0;
+    let mut in_escape = false;
+    for c in s.chars() {
+        if c == '\x1b' {
+            in_escape = true;
+        } else if in_escape {
+            if c == 'm' {
+                in_escape = false;
+            }
+        } else {
+            width += 1;
+        }
+    }
+    width
+}
+
+/// Show a loading screen while fetching content
+fn show_loading_screen(url: &str) {
+    let width = terminal_width();
+    let height = terminal_height();
+    
+    reset_scroll_region();
+    clear_screen();
+    
+    let mid_row = height / 2;
+    move_cursor(mid_row - 1, 1);
+    
+    let loading_text = format!("  {} Loading...", style("⟳").cyan());
+    println!("{}", loading_text);
+    
+    let url_text = format!("  {}", style(truncate_url(url, width - 4)).dim());
+    println!("{}", url_text);
+    
+    let _ = io::stdout().flush();
+}
+
+/// Show a brief status message in the footer area
+fn show_status_message(msg: &str, success: bool) {
+    let footer_row = footer_start_row();
+    
+    save_cursor();
+    hide_cursor();
+    move_cursor(footer_row + 1, 1);
+    clear_line();
+    
+    let styled_msg = if success {
+        format!("  {} {}", style("✓").green(), style(msg).green())
+    } else {
+        format!("  {} {}", style("!").yellow(), style(msg).yellow())
+    };
+    print!("{}", styled_msg);
+    clear_to_eol();
+    
+    let _ = io::stdout().flush();
+    restore_cursor();
+    show_cursor();
+    
+    // Brief pause so user can see the message
+    std::thread::sleep(std::time::Duration::from_millis(600));
+}
+
+/// Show help as an overlay
+fn show_help_overlay() {
+    reset_scroll_region();
+    clear_screen();
+    
+    println!();
+    println!("  {}", style("CurlUp Help").cyan().bold());
+    println!("  {}", style("─".repeat(50)).dim());
+    println!();
+    
+    println!("  {}  {}", style("NAVIGATION").white().bold(), "");
+    println!("       {}          follow link number", style("1-99").cyan());
+    println!("       {}             go back (shows destination)", style("b").cyan());
+    println!("       {}             go forward (shows destination)", style("f").cyan());
+    println!("       {}             refresh page", style("r").cyan());
+    println!("       {}          go to URL directly", style("url").cyan());
+    println!();
+    
+    println!("  {}  {}", style("SCROLLING").white().bold(), "");
+    println!("       {} or {}     scroll up/down one line", style("k").cyan(), style("j").cyan());
+    println!("       {} or {}     page up/down", style("e").cyan(), style("d").cyan());
+    println!("       {} {}        jump to top/bottom", style("g").cyan(), style("G").cyan());
+    println!();
+    
+    println!("  {}  {}", style("MODES").white().bold(), "");
+    println!("       {}             toggle reader mode", style("C").magenta());
+    println!("                 Extracts article content for");
+    println!("                 distraction-free reading");
+    println!();
+    
+    println!("  {}  {}", style("OTHER").white().bold(), "");
+    println!("       {}             show current URL", style("u").cyan());
+    println!("       {}          return to start screen", style("home").cyan());
+    println!("       {}             quit CurlUp", style("q").cyan());
+    println!();
+    
+    println!("  {}", style("─".repeat(50)).dim());
+    print!("  {} ", style("Press Enter to continue...").dim());
+    let _ = io::stdout().flush();
+    
+    let mut buf = String::new();
+    let _ = io::stdin().read_line(&mut buf);
+}
+
+/// Show current URL as an overlay
+fn show_url_overlay(url: &str) {
+    reset_scroll_region();
+    clear_screen();
+    
+    println!();
+    println!("  {}", style("Current URL").white().bold());
+    println!();
+    println!("  {}", style(url).cyan().underlined());
+    println!();
+    println!("  {}", style("(Copy this URL from your terminal)").dim());
+    println!();
+    
+    print!("  {} ", style("Press Enter to continue...").dim());
+    let _ = io::stdout().flush();
+    
+    let mut buf = String::new();
+    let _ = io::stdin().read_line(&mut buf);
+}
+
+/// Clean up terminal state before exiting
+fn cleanup_and_exit() {
+    reset_scroll_region();
+    show_cursor();
+    println!("\n  {}\n", style("Goodbye!").dim());
+}
+
+/// Prompt for action with the floating UI
+fn prompt_for_action_floating(
+    link_count: usize,
+    view_state: &ViewState,
+) -> Result<BrowseAction> {
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
     let input = input.trim();
     
+    // Empty input = scroll down a bit (more intuitive than refresh)
     if input.is_empty() {
+        if view_state.can_scroll_down() {
+            return Ok(BrowseAction::ScrollDown(3));
+        }
         return Ok(BrowseAction::Refresh);
     }
     
-    // Check for reader mode toggle first (case-sensitive R)
-    if input == "R" || input == "reader" {
-        return Ok(BrowseAction::ToggleReader);
+    // Single character commands for scrolling (most common)
+    if input.len() == 1 {
+        match input {
+            // Scroll commands (vim-style)
+            "j" => return Ok(BrowseAction::ScrollDown(1)),
+            "k" => return Ok(BrowseAction::ScrollUp(1)),
+            "g" => return Ok(BrowseAction::GoToTop),
+            "G" => return Ok(BrowseAction::GoToBottom),
+            "d" | " " => return Ok(BrowseAction::PageDown), // page down
+            "e" => return Ok(BrowseAction::PageUp), // page up
+            
+            // Condensed mode toggle (case-sensitive C)
+            "C" => return Ok(BrowseAction::ToggleCondensed),
+            
+            // Navigation
+            "q" => return Ok(BrowseAction::Quit),
+            "b" => return Ok(BrowseAction::Back),
+            "f" => return Ok(BrowseAction::Forward),
+            "r" => return Ok(BrowseAction::Refresh),
+            "h" | "?" => return Ok(BrowseAction::Help),
+            "u" | "U" => return Ok(BrowseAction::ShowUrl),
+            
+            _ => {}
+        }
     }
     
+    // Multi-character commands
     let lower = input.to_lowercase();
     
     match lower.as_str() {
-        "q" | "quit" | "exit" => Ok(BrowseAction::Quit),
-        "b" | "back" => Ok(BrowseAction::Back),
-        "r" | "refresh" | "reload" => Ok(BrowseAction::Refresh),
-        "h" | "help" | "?" => Ok(BrowseAction::Help),
-        "u" | "url" => Ok(BrowseAction::ShowUrl),
-        "home" | "start" => Ok(BrowseAction::Home),
-        _ => {
-            // Check if it's a URL
-            if input.contains('.') && !input.contains(' ') {
-                let url = normalize_url(input);
-                return Ok(BrowseAction::GoToUrl(url));
-            }
-            
-            // Try to parse as a number
-            if let Ok(num) = input.parse::<usize>() {
-                if num > 0 && num <= link_count {
-                    Ok(BrowseAction::FollowLink(num))
-                } else if num == 0 {
-                    Ok(BrowseAction::Invalid("Link numbers start at 1".to_string()))
-                } else {
-                    Ok(BrowseAction::Invalid(format!(
-                        "Link #{} not found (only {} links on this page)",
-                        num,
-                        link_count
-                    )))
-                }
-            } else {
-                Ok(BrowseAction::Invalid(input.to_string()))
-            }
+        "quit" | "exit" => return Ok(BrowseAction::Quit),
+        "back" => return Ok(BrowseAction::Back),
+        "forward" => return Ok(BrowseAction::Forward),
+        "refresh" | "reload" => return Ok(BrowseAction::Refresh),
+        "help" => return Ok(BrowseAction::Help),
+        "url" => return Ok(BrowseAction::ShowUrl),
+        "home" | "start" => return Ok(BrowseAction::Home),
+        "top" => return Ok(BrowseAction::GoToTop),
+        "bottom" | "end" => return Ok(BrowseAction::GoToBottom),
+        "condensed" | "reader" => return Ok(BrowseAction::ToggleCondensed),
+        "gg" => return Ok(BrowseAction::GoToTop),
+        _ => {}
+    }
+    
+    // Check if it's a URL
+    if input.contains('.') && !input.contains(' ') {
+        let url = normalize_url(input);
+        return Ok(BrowseAction::GoToUrl(url));
+    }
+    
+    // Try to parse as a number (link selection)
+    if let Ok(num) = input.parse::<usize>() {
+        if num > 0 && num <= link_count {
+            return Ok(BrowseAction::FollowLink(num));
+        } else if num == 0 {
+            return Ok(BrowseAction::Invalid("Link numbers start at 1".to_string()));
+        } else {
+            return Ok(BrowseAction::Invalid(format!(
+                "Link #{} not found ({} links)",
+                num, link_count
+            )));
         }
     }
+    
+    Ok(BrowseAction::Invalid(input.to_string()))
 }
 
 /// Normalize URL (add https:// if needed)
@@ -351,57 +897,29 @@ fn normalize_url(url: &str) -> String {
     }
 }
 
-/// Print page header with URL, navigation context, and reader mode indicator
-fn print_header_with_mode(url: &str, history_depth: usize, reader_mode: bool) {
-    let width = terminal_width();
-    
-    let back_indicator = if history_depth > 0 {
-        format!(" {} ", style(format!("[{}]", history_depth)).dim())
-    } else {
-        String::new()
-    };
-    
-    let reader_indicator = if reader_mode {
-        format!(" {}", style("[Reader]").magenta().bold())
-    } else {
-        String::new()
-    };
-    
-    println!();
-    println!("{}", style("─".repeat(width)).dim());
-    println!(
-        "  {}{}{}{}",
-        style("CurlUp").cyan().bold(),
-        reader_indicator,
-        back_indicator,
-        style(truncate_url(url, width.saturating_sub(30))).dim()
-    );
-    println!("{}", style("─".repeat(width)).dim());
-    println!();
-}
-
-/// Build render lines for reader mode content with article metadata
+/// Build render lines for condensed mode content with article metadata
 fn build_reader_render_lines(reader: &ReaderContent) -> Vec<String> {
     use crate::render::text::render_html_to_width;
     
     let width = terminal_width();
     let mut lines = Vec::new();
     
-    // Article title
+    // Article title - using brand colors
     lines.push(format!(
-        "{}{}{}",
-        "\x1b[1m\x1b[36m", // Bold cyan
+        "{}{}{}{}",
+        brand::BOLD,
+        brand::TEAL,
         reader.title,
-        "\x1b[0m"
+        RESET
     ));
     
     // Underline for title
     let title_len = reader.title.chars().count().min(width);
     lines.push(format!(
         "{}{}{}",
-        "\x1b[36m",
+        brand::TEAL,
         "═".repeat(title_len),
-        "\x1b[0m"
+        RESET
     ));
     lines.push(String::new());
     
@@ -427,15 +945,15 @@ fn build_reader_render_lines(reader: &ReaderContent) -> Vec<String> {
     if !meta_parts.is_empty() {
         lines.push(format!(
             "{}{}{}",
-            "\x1b[2m", // Dim
+            brand::DIM,
             meta_parts.join(" · "),
-            "\x1b[0m"
+            RESET
         ));
         lines.push(String::new());
     }
     
     // Separator
-    lines.push(format!("{}{}{}", "\x1b[2m", "─".repeat(width.min(60)), "\x1b[0m"));
+    lines.push(format!("{}{}{}", brand::DIM, "─".repeat(width.min(60)), RESET));
     lines.push(String::new());
     
     // Inject link markers into the HTML content
@@ -453,7 +971,7 @@ fn build_reader_render_lines(reader: &ReaderContent) -> Vec<String> {
     lines
 }
 
-/// Inject link markers into reader HTML
+/// Inject link markers into condensed mode HTML
 fn inject_reader_link_markers(html: &str, links: &[crate::dom::content::Link]) -> String {
     let mut result = html.to_string();
     
@@ -486,108 +1004,15 @@ fn inject_reader_link_markers(html: &str, links: &[crate::dom::content::Link]) -
     result
 }
 
-/// Colorize link markers in rendered text
+/// Colorize link markers in condensed mode rendered text
 fn colorize_reader_link_markers(line: &str) -> String {
     let mut result = line.to_string();
     for num in 1..=MAX_LINKS {
         let placeholder = format!("«{}»", num);
-        let colored = format!("\x1b[46;30;1m[{}]\x1b[0m", num);
+        let colored = brand::link_marker(num);
         result = result.replace(&placeholder, &colored);
     }
     result
-}
-
-/// Print help information with reader mode
-fn print_help_with_reader() {
-    clear_screen();
-    
-    println!();
-    println!("  {}", style("CurlUp Navigation").cyan().bold());
-    println!("  {}", style("─".repeat(50)).dim());
-    println!();
-    
-    // Links section - most important
-    println!("  {}  Links appear as {} in the text", 
-        style("LINKS").white().bold(),
-        style("colored numbers").cyan().bold()
-    );
-    println!("       Type the number and press Enter to follow");
-    println!("       Example: {} opens the first link", style("1").cyan().bold());
-    println!();
-    
-    // Reader mode
-    println!("  {}", style("READER MODE").white().bold());
-    println!("       {}      toggle reader mode (article view)", style("R").magenta());
-    println!("       Extracts just the article content for");
-    println!("       distraction-free reading. Works on news,");
-    println!("       blogs, and article pages.");
-    println!();
-    
-    // Navigation
-    println!("  {}", style("NAVIGATE").white().bold());
-    println!("       {}      go back to previous page", style("b").cyan());
-    println!("       {}      refresh current page", style("r").cyan());
-    println!("       {}   return to site picker", style("home").cyan());
-    println!();
-    
-    // Direct URL
-    println!("  {}", style("GO TO URL").white().bold());
-    println!("       Type any URL directly (e.g., {})", style("google.com").cyan());
-    println!("       {}      show current page URL (for copying)", style("u").cyan());
-    println!();
-    
-    // Scrolling
-    println!("  {}", style("SCROLL").white().bold());
-    println!("       Use your terminal's native scrollback:");
-    println!("       Mouse wheel, trackpad, or Shift+PageUp/Down");
-    println!();
-    
-    // Exit
-    println!("  {}", style("EXIT").white().bold());
-    println!("       {}      quit CurlUp", style("q").cyan());
-    println!();
-    
-    println!("  {}", style("─".repeat(50)).dim());
-}
-
-/// Print current URL
-fn print_current_url(url: &str) {
-    println!();
-    println!("  {}", style("Current URL:").white().bold());
-    println!("  {}", style(url).cyan().underlined());
-    println!();
-    println!("  {}", style("(You can copy this URL)").dim());
-}
-
-/// Print error message
-fn print_error(msg: &str) {
-    println!("\n  {}", style(msg).red());
-    std::thread::sleep(std::time::Duration::from_millis(1500));
-}
-
-/// Print warning message
-fn print_warning(msg: &str) {
-    println!("\n  {}", style(msg).yellow());
-    std::thread::sleep(std::time::Duration::from_millis(1500));
-}
-
-/// Print loading indicator inline
-fn print_loading_inline() {
-    print!("\n  Loading...");
-    let _ = io::stdout().flush();
-}
-
-/// Print goodbye message
-fn print_goodbye() {
-    println!("\n  {}\n", style("Goodbye!").dim());
-}
-
-/// Wait for user to press Enter
-fn wait_for_enter() {
-    print!("\n  {} ", style("Press Enter to continue...").dim());
-    let _ = io::stdout().flush();
-    let mut buf = String::new();
-    let _ = io::stdin().read_line(&mut buf);
 }
 
 /// Get page title from content (extracts domain from URL)
