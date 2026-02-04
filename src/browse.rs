@@ -29,6 +29,7 @@ pub async fn run_interactive_with_options(
     initial_url: &str,
     stealth: bool,
     multilens: bool,
+    focus: bool,
 ) -> Result<()> {
     let mut history: Vec<HistoryEntry> = Vec::new();
     let mut current_url = initial_url.to_string();
@@ -44,11 +45,11 @@ pub async fn run_interactive_with_options(
         browser::navigation::navigate_and_wait_with_stealth(client, &current_url, stealth).await?;
         browser::navigation::scroll_to_top_after_load(client).await?;
         
-        // Extract content with links (use multilens if enabled)
+        // Extract content with links (use multilens if enabled, apply focus filtering)
         let content = if multilens {
-            extract_multilens(client, &current_url).await?
+            extract_multilens(client, &current_url, focus).await?
         } else {
-            extract_page_content(client, &current_url).await?
+            extract_page_content(client, &current_url, focus).await?
         };
         
         // Build lines for display

@@ -10,14 +10,24 @@ use fantoccini::Client;
 use scraper::Html;
 
 use super::content::{Link, PageContent};
+use super::filter::clean_html;
 
 /// Extract page content using Rust-side DOM parsing.
 ///
 /// Fetches the full rendered HTML and extracts links using scraper.
 /// The HTML is passed to html2text for terminal rendering.
-pub async fn extract_multilens(client: &Client, url: &str) -> Result<PageContent> {
+/// If `focus` is true, applies content filtering to remove noise elements.
+pub async fn extract_multilens(client: &Client, url: &str, focus: bool) -> Result<PageContent> {
     // Get full rendered HTML
-    let html = snapshot::fetch_rendered_html(client).await?;
+    let raw_html = snapshot::fetch_rendered_html(client).await?;
+    
+    // Apply content filtering if focus mode is enabled
+    let html = if focus {
+        clean_html(&raw_html)
+    } else {
+        raw_html
+    };
+    
     let doc = Html::parse_document(&html);
 
     // Extract links from the parsed document

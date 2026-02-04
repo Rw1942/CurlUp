@@ -42,16 +42,19 @@ async fn main() -> Result<()> {
     // Track stealth mode for navigation
     let stealth = chrome_config.stealth;
 
+    // Track focus mode (enabled by default)
+    let focus = args.focus();
+
     // Run in interactive browse mode (default) or single-page mode
     if single_mode {
         // Single page mode - fetch once and exit
         browser::navigation::navigate_and_wait_with_stealth(&client, &current_url, stealth).await?;
 
-        // Extract content including links (use multilens if enabled)
+        // Extract content including links (use multilens if enabled, apply focus filtering)
         let content = if args.multilens {
-            dom::multilens::extract_multilens(&client, &current_url).await?
+            dom::multilens::extract_multilens(&client, &current_url, focus).await?
         } else {
-            dom::extract::extract_page_content(&client, &current_url).await?
+            dom::extract::extract_page_content(&client, &current_url, focus).await?
         };
         let link_count = content.links.len();
 
@@ -79,7 +82,7 @@ async fn main() -> Result<()> {
         // Interactive browsing mode (default)
         // This loop allows returning to the start screen with 'home' command
         loop {
-            match browse::run_interactive_with_options(&client, &current_url, stealth, args.multilens).await {
+            match browse::run_interactive_with_options(&client, &current_url, stealth, args.multilens, focus).await {
                 Ok(()) => {
                     // User exited browse mode (quit or home)
                     // Try to show start screen again

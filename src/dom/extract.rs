@@ -9,6 +9,7 @@ use fantoccini::Client;
 use serde::Deserialize;
 
 use super::content::{Link, PageContent};
+use super::filter::clean_html;
 use super::multilens::snapshot::fetch_rendered_html;
 
 #[derive(Debug, Deserialize)]
@@ -49,9 +50,18 @@ return (function() {
 "#;
 
 /// Extract page content (HTML and links) from the browser.
-pub async fn extract_page_content(client: &Client, current_url: &str) -> Result<PageContent> {
+///
+/// If `focus` is true, applies content filtering to remove noise elements.
+pub async fn extract_page_content(client: &Client, current_url: &str, focus: bool) -> Result<PageContent> {
     // Fetch rendered HTML for html2text rendering
-    let html = fetch_rendered_html(client).await?;
+    let raw_html = fetch_rendered_html(client).await?;
+    
+    // Apply content filtering if focus mode is enabled
+    let html = if focus {
+        clean_html(&raw_html)
+    } else {
+        raw_html
+    };
     
     // Extract links separately
     let result = client.execute(EXTRACT_LINKS_JS, vec![]).await?;

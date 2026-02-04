@@ -23,7 +23,7 @@ EXAMPLES:
     curlup -v mail.google.com           Visible browser for login
     curlup --user-agent "MyBot/1.0"     Use custom user-agent
     curlup --no-stealth -v              Debug mode without stealth
-    curlup -m medium.com/article        Multi-lens extraction for better content
+    curlup --no-focus reddit.com        Show full page including nav/ads
 
 REQUIREMENTS:
     • Google Chrome installed
@@ -60,4 +60,15 @@ pub struct Cli {
     /// Pipe output to system pager (less) for easy scrolling - implies --single
     #[arg(long, short = 'p')]
     pub pager: bool,
+
+    /// Disable focus mode - show full page including navigation, ads, etc.
+    #[arg(long)]
+    pub no_focus: bool,
+}
+
+impl Cli {
+    /// Returns true if focus mode is enabled (default: true, disabled with --no-focus)
+    pub fn focus(&self) -> bool {
+        !self.no_focus
+    }
 }
